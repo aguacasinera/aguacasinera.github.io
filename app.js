@@ -33,7 +33,17 @@ const estado = {
   errorGuardar: false,
   temporizador: null,
   confirmarCierre: false,
-  resumen: null       // lo que devuelve resumenAsistencia()
+  resumen: null,      // lo que devuelve resumenAsistencia()
+  // Fase 3 · Tesorería
+  cuenta: null,       // lo que devuelve miCuenta()
+  verCuenta: false,
+  pago: null,         // formulario "Reportar pago": { monto, metodo, nota, imagen, vista }
+  teso: null,         // lo que devuelve tesoreriaResumen()
+  tesoCuenta: null,   // { id, datos } de la persona abierta en Tesorería
+  rechazando: null,   // id del pago que se está rechazando
+  capturas: {},       // id de pago → imagen (data URL) ya cargada
+  cobro: { concepto: '', monto: '', tipo: 'polo', ids: [] },
+  efectivo: { id: '', monto: '', metodo: 'Efectivo', nota: '' }
 };
 
 /* ---------- Íconos de línea (estilo Lucide, licencia ISC) ---------- */
@@ -57,6 +67,7 @@ const ICONOS = {
   izq: '<path d="m15 18-6-6 6-6"/>',
   der: '<path d="m9 18 6-6-6-6"/>',
   candado: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  billetera: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
   descargar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'
 };
 function icono(nombre) {
@@ -106,6 +117,7 @@ function leerToken() { try { return localStorage.getItem('ac_token'); } catch (e
 function guardarToken(t) { try { t ? localStorage.setItem('ac_token', t) : localStorage.removeItem('ac_token'); } catch (e) {} }
 
 function aviso(texto) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());   // uno a la vez, sin encimarse
   const t = document.createElement('div');
   t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = texto;
   document.body.appendChild(t);
@@ -155,6 +167,7 @@ function cerrarSesion() {
   guardarToken(null);
   estado.token = null; estado.menu = false; estado.vista = 'inicio';
   estado.lista = null; estado.resumen = null; estado.cambios = {};
+  estado.cuenta = null; estado.verCuenta = false; estado.pago = null; estado.teso = null; estado.tesoCuenta = null; estado.capturas = {};
   mostrarAcceso();
 }
 
@@ -242,9 +255,11 @@ function pintar() {
   const permisos = d.permisos || { lista: false, directiva: !!d.admin };
   const pestanas = [['inicio', 'Inicio']];
   if (permisos.lista) pestanas.push(['lista', 'Lista']);
+  if (permisos.tesoreria) pestanas.push(['tesoreria', 'Tesorería']);
   if (permisos.directiva && d.admin) pestanas.push(['directiva', 'Directiva']);
   if (!pestanas.some(p => p[0] === estado.vista)) estado.vista = 'inicio';
-  const rolTexto = d.yo.rol === 'admin' ? 'Directiva' : (permisos.lista ? 'Talleres' : 'Miembro');
+  const rolTexto = d.yo.rol === 'admin' ? 'Directiva'
+    : [permisos.lista ? 'Talleres' : '', permisos.tesoreria ? 'Tesorería' : ''].filter(Boolean).join(' · ') || 'Miembro';
 
   document.getElementById('app').innerHTML = `
     <header class="barra">
@@ -258,11 +273,11 @@ function pintar() {
           <p class="version">Versión ${esc(CONFIG.VERSION)}</p>
         </div>` : ''}
     </header>
-    ${pestanas.length > 1 ? `<nav class="pestanas" role="tablist">
+    ${pestanas.length > 1 ? `<nav class="pestanas ${pestanas.length > 3 ? 'muchas' : ''}" role="tablist">
         ${pestanas.map(([id, texto]) => `<button role="tab" aria-selected="${String(estado.vista === id)}"
             onclick="irA('${id}')">${texto}</button>`).join('')}
       </nav>` : ''}
-    ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'directiva' ? vistaDirectiva(d) : vistaInicio(d)}`;
+    ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'tesoreria' ? vistaTesoreria() : estado.vista === 'directiva' ? vistaDirectiva(d) : vistaInicio(d)}`;
 
   if (estado.editando === 'llego_tarde' && !estado.hora) document.getElementById('hora')?.focus();
 }
@@ -448,7 +463,7 @@ function tarjetaResumen(s) {
 
 function vistaInicio(d) {
   return tarjetaEnsayo(d.ensayo) + bloquePlazo(d.ensayo) + tarjetaRespuesta(d) +
-    (d.ensayo.estado === 'cancelado' ? '' : tarjetaResumen(d.resumen)) + tarjetaMiAsistencia(d.miAsistencia);
+    (d.ensayo.estado === 'cancelado' ? '' : tarjetaResumen(d.resumen)) + tarjetaMiCuenta(d) + tarjetaMiAsistencia(d.miAsistencia);
 }
 
 /** Cambia de pestaña. La lista y el resumen se piden recién la primera vez que se abren. */
@@ -457,6 +472,7 @@ async function irA(vista) {
   estado.vista = vista; estado.menu = false;
   pintar();
   if (vista === 'lista' && !estado.lista) { cargarLista(); cargarResumen(); }
+  if (vista === 'tesoreria') cargarTesoreria();
 }
 
 /* ============================================================
@@ -806,6 +822,321 @@ function mensajePin() {
   const p = estado.pinNuevo;
   return `Hola ${p.nombre.split(' ')[0]}, esta es la app de Agua Casinera para avisar si vas a los ensayos: ${estado.datos.admin.url}\n` +
          `Elige tu nombre y entra con este PIN: ${p.pin}\nNo lo compartas con nadie.`;
+}
+
+/* ============================================================
+ *  FASE 3 · MI CUENTA (todos) y TESORERÍA (área Tesorería y directiva)
+ * ============================================================ */
+
+const soles = n => 'S/ ' + (Math.round(n * 100) / 100).toFixed(Number.isInteger(n) ? 0 : 2);
+const ESTADO_COBRO = { pagado: 'Pagado', parcial: 'Pago parcial', pendiente: 'Pendiente', vencido: 'Vencido' };
+const ESTADO_PAGO = { pendiente: 'Por revisar', confirmado: 'Confirmado', rechazado: 'Rechazado' };
+
+function tarjetaMiCuenta(d) {
+  const s = d.miSaldo;
+  if (!s) return '';
+  const k = estado.cuenta;
+  const cabecera = s.saldo > 0
+    ? `<p class="saldo debe"><b>${soles(s.saldo)}</b> por pagar${s.vencido ? ` · <span class="insignia sin-aviso">${soles(s.vencido)} vencido</span>` : ''}</p>`
+    : s.saldo < 0 ? `<p class="saldo afavor"><b>${soles(-s.saldo)}</b> a tu favor</p>`
+    : `<p class="saldo aldia">${icono('check')} <b>Estás al día</b></p>`;
+  return `<section class="tarjeta" id="mi-cuenta">
+    <h2>${icono('billetera')} Mi cuenta</h2>
+    ${cabecera}
+    ${s.porRevisar ? `<p class="sub">${s.porRevisar === 1 ? 'Un pago' : s.porRevisar + ' pagos'} (${soles(s.montoPorRevisar)}) esperando que Tesorería lo revise.</p>` : ''}
+    ${estado.verCuenta && k ? detalleCuenta(k, false) : ''}
+    ${estado.pago ? formularioPago(k) : ''}
+    <div class="acciones">
+      ${!estado.pago ? `<button class="boton" onclick="abrirPago()">${icono('enviar')} Reportar un pago</button>` : ''}
+      <button class="boton secundario" onclick="alternarCuenta()">${estado.verCuenta ? 'Ocultar detalle' : 'Ver detalle'}</button>
+    </div>
+  </section>`;
+}
+
+/** Lista de cobros y pagos. editable = Tesorería puede anular cobros hechos a mano. */
+function detalleCuenta(k, editable) {
+  const cobros = k.cobros.length ? k.cobros.map(c => `
+      <li class="cobro c-${c.estado}">
+        <div class="cobro-fila"><span>${esc(c.concepto)}</span><b>${soles(c.monto)}</b></div>
+        <div class="cobro-estado"><span class="chip-estado e-${c.estado}">${ESTADO_COBRO[c.estado]}${c.estado === 'parcial' ? ' · faltan ' + soles(c.monto - c.cubierto) : ''}</span>
+          ${c.venceTexto ? `<small>${esc(c.venceTexto)}</small>` : ''}
+          ${editable && c.id ? `<button class="enlace peque" onclick="anular('${esc(c.id)}')">Anular</button>` : ''}</div>
+      </li>`).join('') : '<li class="sub">Sin cobros todavía.</li>';
+  const pagos = k.pagos.length ? k.pagos.map(p => `
+      <li class="pago-fila">
+        <div class="cobro-fila"><span>${esc(p.metodo)} · ${esc(cuando(p.fecha))}</span><b>${soles(p.monto)}</b></div>
+        <div class="cobro-estado"><span class="chip-estado p-${p.estado}">${ESTADO_PAGO[p.estado]}</span>
+          ${p.revisadoPor && p.estado !== 'pendiente' ? `<small>por ${esc(p.revisadoPor)}</small>` : ''}
+          ${p.nota ? `<small>${esc(p.nota)}</small>` : ''}</div>
+        ${p.motivoRechazo ? `<p class="motivo-rechazo">Motivo: ${esc(p.motivoRechazo)}</p>` : ''}
+      </li>`).join('') : '<li class="sub">Sin pagos todavía.</li>';
+  return `<div class="detalle-cuenta">
+    <h3>Cobros</h3><ul class="cobros">${cobros}</ul>
+    <h3>Pagos</h3><ul class="cobros">${pagos}</ul>
+    <p class="sub">Los pagos se aplican a lo más antiguo primero. Total cobrado ${soles(k.totalCobrado)} · pagado ${soles(k.totalPagado)}.</p>
+  </div>`;
+}
+
+async function alternarCuenta() {
+  estado.verCuenta = !estado.verCuenta;
+  if (estado.verCuenta && !estado.cuenta) await cargarCuenta();
+  pintar();
+}
+async function cargarCuenta() {
+  try { estado.cuenta = await api('miCuenta', estado.token); }
+  catch (e) { aviso(mensajeError(e)); }
+}
+
+async function abrirPago() {
+  if (!estado.cuenta) await cargarCuenta();
+  const k = estado.cuenta || { saldo: 0, montoPorRevisar: 0 };
+  const sugerido = Math.max(0, k.saldo - k.montoPorRevisar);
+  estado.pago = { monto: sugerido ? String(sugerido) : '', metodo: 'Yape', nota: '', imagen: null, vista: null };
+  pintar();
+  document.getElementById('mi-cuenta')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function formularioPago(k) {
+  const f = estado.pago;
+  const metodos = (k && k.metodos) || ['Yape', 'Plin', 'Efectivo', 'Transferencia'];
+  return `<div class="form-pago">
+    <h3>Reportar un pago</h3>
+    ${k && k.instrucciones ? `<p class="instrucciones">${esc(k.instrucciones)}</p>` : ''}
+    <label class="campo" for="pago-monto">Monto (S/)</label>
+    <input type="text" inputmode="decimal" id="pago-monto" value="${esc(f.monto)}" oninput="estado.pago.monto=this.value" style="max-width:160px">
+    <p class="campo" style="margin-top:12px">¿Cómo pagaste?</p>
+    <div class="chips">${metodos.map(m => `<button class="chip" aria-pressed="${String(f.metodo === m)}"
+        onclick="estado.pago.metodo='${m}';pintar()">${f.metodo === m ? icono('check') : ''}${m}</button>`).join('')}</div>
+    ${f.metodo !== 'Efectivo' ? `
+      <label class="campo" style="margin-top:12px" for="pago-captura">Captura del pago <span class="ayuda">· ayuda a Tesorería a confirmarlo rápido</span></label>
+      <input type="file" id="pago-captura" accept="image/*" onchange="elegirCaptura(this.files[0])">
+      ${f.vista ? `<img class="miniatura" src="${f.vista}" alt="Vista previa de la captura">` : ''}` : ''}
+    <label class="campo" style="margin-top:12px" for="pago-nota">Nota <span class="ayuda">· opcional</span></label>
+    <input type="text" id="pago-nota" maxlength="200" placeholder="Ej.: cuota de noviembre y polo" value="${esc(f.nota)}" oninput="estado.pago.nota=this.value">
+    <div class="acciones">
+      <button class="boton secundario" onclick="estado.pago=null;pintar()">Cancelar</button>
+      <button class="boton" ${estado.ocupado ? 'disabled' : ''} onclick="enviarPago()">${icono('enviar')} Enviar a Tesorería</button>
+    </div>
+  </div>`;
+}
+
+/** Achica la foto (máx. 1280 px, JPEG) antes de enviarla: sube rápido aunque la señal sea mala. */
+function comprimirImagen(archivo) {
+  return new Promise((ok, mal) => {
+    const img = new Image(), url = URL.createObjectURL(archivo);
+    img.onload = () => {
+      const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+      const lienzo = document.createElement('canvas');
+      lienzo.width = Math.round(img.width * k); lienzo.height = Math.round(img.height * k);
+      lienzo.getContext('2d').drawImage(img, 0, 0, lienzo.width, lienzo.height);
+      URL.revokeObjectURL(url);
+      ok(lienzo.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => mal(new Error('No se pudo leer la imagen.'));
+    img.src = url;
+  });
+}
+
+async function elegirCaptura(archivo) {
+  if (!archivo) return;
+  try {
+    const dataUrl = await comprimirImagen(archivo);
+    estado.pago.vista = dataUrl;
+    estado.pago.imagen = { base64: dataUrl.split(',')[1], tipo: 'image/jpeg' };
+  } catch (e) { aviso(mensajeError(e)); }
+  pintar();
+}
+
+async function enviarPago() {
+  const f = estado.pago;
+  const monto = Number(String(f.monto).replace(',', '.'));
+  if (!(monto > 0)) return aviso('Escribe el monto que pagaste.');
+  if (f.metodo !== 'Efectivo' && !f.imagen && !confirm('¿Enviar sin captura? Tesorería tendrá que buscar el pago a mano.')) return;
+  estado.ocupado = true; pintar();
+  try {
+    estado.cuenta = await api('reportarPago', estado.token, { monto, metodo: f.metodo, nota: f.nota, imagen: f.metodo === 'Efectivo' ? null : f.imagen });
+    estado.datos.miSaldo = { saldo: estado.cuenta.saldo, vencido: estado.cuenta.vencido,
+                             porRevisar: estado.cuenta.porRevisar, montoPorRevisar: estado.cuenta.montoPorRevisar };
+    estado.pago = null; estado.verCuenta = true;
+    aviso('Listo. Tesorería revisará tu pago.');
+  } catch (e) { aviso(mensajeError(e)); }
+  estado.ocupado = false; pintar();
+}
+
+/* ---------- Pestaña Tesorería ---------- */
+
+async function cargarTesoreria() {
+  try { estado.teso = await api('tesoreriaResumen', estado.token); }
+  catch (e) { if (mensajeError(e).includes('SESION')) return cerrarSesion(); aviso(mensajeError(e)); }
+  pintar();
+}
+
+/** Llama a una acción de Tesorería que devuelve el resumen actualizado. */
+async function accionTeso(funcion, ...args) {
+  if (estado.ocupado) return;
+  estado.ocupado = true; pintar();
+  try {
+    estado.teso = await api(funcion, estado.token, ...args);
+    if (estado.tesoCuenta) estado.tesoCuenta.datos = await api('tesoreriaCuenta', estado.token, estado.tesoCuenta.id);
+    estado.rechazando = null;
+    estado.ocupado = false; pintar();
+    return true;
+  } catch (e) { aviso(mensajeError(e)); }
+  estado.ocupado = false; pintar();
+  return false;
+}
+
+async function verCaptura(id) {
+  if (estado.capturas[id]) { delete estado.capturas[id]; return pintar(); }
+  estado.capturas[id] = 'cargando'; pintar();
+  try { estado.capturas[id] = await api('verComprobante', estado.token, id); }
+  catch (e) { delete estado.capturas[id]; aviso(mensajeError(e)); }
+  pintar();
+}
+
+async function abrirPersona(id) {
+  if (estado.tesoCuenta && estado.tesoCuenta.id === id) { estado.tesoCuenta = null; return pintar(); }
+  estado.tesoCuenta = { id, datos: null }; pintar();
+  try { estado.tesoCuenta.datos = await api('tesoreriaCuenta', estado.token, id); }
+  catch (e) { estado.tesoCuenta = null; aviso(mensajeError(e)); }
+  pintar();
+}
+
+async function anular(cargoId) {
+  if (!confirm('¿Anular este cobro? Quedará registrado como anulado.')) return;
+  try {
+    estado.tesoCuenta.datos = await api('anularCargo', estado.token, cargoId);
+    estado.teso = await api('tesoreriaResumen', estado.token);
+  } catch (e) { aviso(mensajeError(e)); }
+  pintar();
+}
+
+async function registrarEfectivo() {
+  const f = estado.efectivo;
+  const monto = Number(String(f.monto).replace(',', '.'));
+  if (!f.id) return aviso('Elige a la persona.');
+  if (!(monto > 0)) return aviso('Escribe el monto.');
+  if (await accionTeso('registrarPago', f.id, { monto, metodo: f.metodo, nota: f.nota })) {
+    estado.efectivo = { id: '', monto: '', metodo: 'Efectivo', nota: '' };
+    aviso('Pago registrado y confirmado.');
+  }
+}
+
+async function crearCobro() {
+  const f = estado.cobro;
+  const monto = Number(String(f.monto).replace(',', '.'));
+  if (f.concepto.trim().length < 3) return aviso('Escribe el concepto.');
+  if (!(monto > 0)) return aviso('Escribe el monto.');
+  if (!f.ids.length) return aviso('Elige al menos a una persona.');
+  if (!confirm(`¿Cobrar ${soles(monto)} por "${f.concepto}" a ${f.ids.length} ${f.ids.length === 1 ? 'persona' : 'personas'}?`)) return;
+  if (await accionTeso('crearCargo', { concepto: f.concepto, monto, tipo: f.tipo, miembroIds: f.ids })) {
+    estado.cobro = { concepto: '', monto: '', tipo: 'polo', ids: [] };
+    aviso('Cobro creado.');
+  }
+}
+
+function alternarEnCobro(id) {
+  const ids = estado.cobro.ids;
+  const i = ids.indexOf(id);
+  i > -1 ? ids.splice(i, 1) : ids.push(id);
+  pintar();
+}
+
+function vistaTesoreria() {
+  const t = estado.teso, ocupado = estado.ocupado ? 'disabled' : '';
+  if (!t) return `<div class="cargando"><span class="ola"></span>Cargando Tesorería…</div>`;
+
+  const revisar = t.porRevisar.map(p => `
+    <li class="por-revisar">
+      <div class="cobro-fila"><strong>${esc(p.nombre)}</strong><b>${soles(p.monto)}</b></div>
+      <p class="sub">${esc(p.metodo)} · ${esc(cuando(p.fecha))}${p.nota ? ' · ' + esc(p.nota) : ''}</p>
+      ${p.conCaptura ? `<button class="enlace peque" onclick="verCaptura('${esc(p.id)}')">${estado.capturas[p.id] ? 'Ocultar captura' : 'Ver captura'}</button>` : '<p class="sub">Sin captura</p>'}
+      ${estado.capturas[p.id] === 'cargando' ? '<p class="sub">Cargando captura…</p>'
+        : estado.capturas[p.id] ? `<img class="captura" src="${estado.capturas[p.id]}" alt="Captura del pago de ${esc(p.nombre)}">` : ''}
+      ${p.propio ? '<p class="sub"><b>Es tu pago:</b> lo revisa otra persona de Tesorería.</p>'
+        : estado.rechazando === p.id ? `
+        <label class="campo" for="motivo-rechazo">¿Por qué se rechaza?</label>
+        <input type="text" id="motivo-rechazo" maxlength="200" placeholder="Ej.: no llegó el Yape">
+        <div class="acciones">
+          <button class="boton secundario" onclick="estado.rechazando=null;pintar()">Volver</button>
+          <button class="boton peligro" ${ocupado} onclick="accionTeso('revisarPago','${esc(p.id)}','rechazado',document.getElementById('motivo-rechazo').value)">Rechazar pago</button>
+        </div>`
+        : `<div class="acciones">
+          <button class="boton" ${ocupado} onclick="accionTeso('revisarPago','${esc(p.id)}','confirmado','')">${icono('check')} Confirmar</button>
+          <button class="boton secundario" onclick="estado.rechazando='${esc(p.id)}';pintar()">${icono('x')} Rechazar</button>
+        </div>`}
+    </li>`).join('');
+
+  const personas = t.personas.map(p => {
+    const abierta = estado.tesoCuenta && estado.tesoCuenta.id === p.id;
+    return `<li class="persona-cuenta">
+      <button class="fila-cuenta" aria-expanded="${String(abierta)}" onclick="abrirPersona('${esc(p.id)}')">
+        <span>${esc(p.nombre)}${p.porRevisar ? ` <span class="insignia tarde">${p.porRevisar} por revisar</span>` : ''}</span>
+        <b class="${p.saldo > 0 ? (p.vencido ? 'debe-vencido' : 'debe') : p.saldo < 0 ? 'afavor' : 'aldia'}">${p.saldo > 0 ? soles(p.saldo) : p.saldo < 0 ? soles(-p.saldo) + ' a favor' : 'Al día'}</b>
+      </button>
+      ${abierta ? (estado.tesoCuenta.datos ? detalleCuenta(estado.tesoCuenta.datos, true) : '<p class="sub">Cargando…</p>') : ''}
+    </li>`;
+  }).join('');
+
+  const e = estado.efectivo, c = estado.cobro;
+  return `
+    <section class="tarjeta">
+      <h2>${icono('billetera')} Tesorería</h2>
+      <div class="cifras">
+        <div><b>${soles(t.porCobrar)}</b><small>Por cobrar</small></div>
+        <div><b>${soles(t.vencido)}</b><small>Vencido</small></div>
+        <div><b>${soles(t.recaudadoMes)}</b><small>Cobrado en ${esc(t.mesTexto)}</small></div>
+      </div>
+    </section>
+
+    <section class="tarjeta">
+      <h2>Pagos por revisar <span class="insignia">${t.porRevisar.length}</span></h2>
+      ${t.porRevisar.length ? `<ul class="cobros">${revisar}</ul>` : '<p class="sub">No hay pagos pendientes de revisión.</p>'}
+    </section>
+
+    <section class="tarjeta">
+      <h2>Cuentas por persona</h2>
+      <p class="sub" style="margin-bottom:8px">Ordenado de mayor a menor deuda. Toca un nombre para ver el detalle.</p>
+      <ul class="cuentas">${personas}</ul>
+    </section>
+
+    <section class="tarjeta">
+      <h2>Registrar un pago recibido</h2>
+      <p class="sub" style="margin-bottom:10px">Para pagos en efectivo u otros que no se reportaron en la app. Queda confirmado.</p>
+      <label class="campo" for="ef-persona">Persona</label>
+      <select id="ef-persona" onchange="estado.efectivo.id=this.value">
+        <option value="">Elige…</option>
+        ${t.miembros.filter(m => m.id !== t.yo).map(m => `<option value="${esc(m.id)}" ${e.id === m.id ? 'selected' : ''}>${esc(m.nombre)}</option>`).join('')}
+      </select>
+      <div class="dos-col">
+        <div><label class="campo" for="ef-monto">Monto (S/)</label>
+          <input type="text" inputmode="decimal" id="ef-monto" value="${esc(e.monto)}" oninput="estado.efectivo.monto=this.value"></div>
+        <div><label class="campo" for="ef-metodo">Medio</label>
+          <select id="ef-metodo" onchange="estado.efectivo.metodo=this.value">${t.metodos.map(m => `<option ${e.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
+      </div>
+      <label class="campo" for="ef-nota">Nota <span class="ayuda">· opcional</span></label>
+      <input type="text" id="ef-nota" maxlength="200" value="${esc(e.nota)}" oninput="estado.efectivo.nota=this.value">
+      <div class="acciones"><button class="boton" ${ocupado} onclick="registrarEfectivo()">Registrar pago</button></div>
+    </section>
+
+    <section class="tarjeta">
+      <h2>Nuevo cobro: polos u otros</h2>
+      <div class="chips" style="margin-bottom:10px">
+        ${[['polo', 'Polo'], ['otro', 'Otro']].map(([v, txt]) => `<button class="chip" aria-pressed="${String(c.tipo === v)}" onclick="estado.cobro.tipo='${v}';pintar()">${c.tipo === v ? icono('check') : ''}${txt}</button>`).join('')}
+      </div>
+      <div class="dos-col">
+        <div><label class="campo" for="co-concepto">Concepto</label>
+          <input type="text" id="co-concepto" maxlength="80" placeholder="${c.tipo === 'polo' ? 'Polo oficial 1' : 'Ej.: Inscripción al festival'}" value="${esc(c.concepto)}" oninput="estado.cobro.concepto=this.value"></div>
+        <div><label class="campo" for="co-monto">Monto (S/)</label>
+          <input type="text" inputmode="decimal" id="co-monto" value="${esc(c.monto)}" oninput="estado.cobro.monto=this.value"></div>
+      </div>
+      <div class="cobro-personas-cab">
+        <p class="campo">¿A quién? <span class="ayuda">· ${c.ids.length} de ${t.miembros.length}</span></p>
+        <button class="enlace peque" onclick="estado.cobro.ids=${c.ids.length === t.miembros.length ? '[]' : 'estado.teso.miembros.map(m => m.id)'};pintar()">${c.ids.length === t.miembros.length ? 'Quitar a todos' : 'Elegir a todos'}</button>
+      </div>
+      <div class="chips">${t.miembros.map(m => `<button class="chip" aria-pressed="${String(c.ids.includes(m.id))}" onclick="alternarEnCobro('${esc(m.id)}')">${c.ids.includes(m.id) ? icono('check') : ''}${esc(m.nombre)}</button>`).join('')}</div>
+      <div class="acciones"><button class="boton" ${ocupado} onclick="crearCobro()">Crear cobro</button></div>
+    </section>`;
 }
 
 /* ============================================================

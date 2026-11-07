@@ -294,4 +294,48 @@
   .total-penalidades { text-align: center; margin-bottom: 8px; }
   .multa-texto { color: var(--primario-oscuro); }
 
+  /* ============ v1.9 · Mi cuenta y Tesorería ============ */
+  .pestanas.muchas button { font-size: .86rem; padding: 9px 2px; }
+  .saldo { font-size: 1.05rem; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .saldo b { font-family: var(--titulos); font-size: 1.6rem; }
+  .saldo.debe b { color: var(--primario-oscuro); }
+  .saldo.afavor b { color: var(--azul); }
+  .saldo.aldia { color: #1d6b3a; }
+  .saldo.aldia b { font-size: 1.15rem; }
+  .detalle-cuenta { border-top: 1px solid var(--borde); margin-top: 12px; padding-top: 4px; }
+  .detalle-cuenta h3, .form-pago h3 { font-size: 1rem; margin: 12px 0 6px; }
+  .cobros, .cuentas { list-style: none; margin: 0; padding: 0; }
+  .cobros li { padding: 9px 0; border-bottom: 1px dashed var(--borde); }
+  .cobros li:last-child { border-bottom: 0; }
+  .cobro-fila { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .cobro-fila b { white-space: nowrap; }
+  .cobro-estado { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 4px; }
+  .cobro-estado small { color: var(--tinta-2); }
+  .chip-estado { font-size: .76rem; font-weight: 700; border-radius: 6px; padding: 1px 8px; }
+  .e-pagado, .p-confirmado { background: #e3f4e8; color: #1d6b3a; }
+  .e-parcial, .e-pendiente, .p-pendiente { background: var(--sol-suave); color: #7a5208; }
+  .e-vencido, .p-rechazado { background: var(--primario-suave); color: var(--primario-oscuro); }
+  .c-pagado .cobro-fila { color: var(--tinta-2); }
+  .motivo-rechazo { font-size: .86rem; color: var(--primario-oscuro); margin-top: 4px; }
+  .enlace.peque { font-size: .86rem; padding: 2px 0; }
+
+  .form-pago { border-top: 1px solid var(--borde); margin-top: 12px; padding-top: 4px; }
+  .instrucciones { background: var(--azul-suave); color: var(--azul); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; font-weight: 700; }
+  input[type=file] { font-size: .9rem; max-width: 100%; }
+  .miniatura { display: block; max-width: 140px; max-height: 180px; border-radius: 10px; margin-top: 8px; border: 1px solid var(--borde); }
+  .captura { display: block; width: 100%; max-height: 520px; object-fit: contain; border-radius: 12px; margin: 8px 0; background: var(--fondo); }
+
+  .por-revisar .acciones .boton { flex: 1; }
+  .fila-cuenta { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; background: none; border: 0;
+                 padding: 12px 0; border-bottom: 1px solid var(--borde); cursor: pointer; text-align: left; font-weight: 500; }
+  .fila-cuenta b { white-space: nowrap; }
+  .fila-cuenta .debe { color: var(--primario-oscuro); }
+  .fila-cuenta .debe-vencido { color: #fff; background: var(--primario); border-radius: 8px; padding: 1px 8px; }
+  .fila-cuenta .afavor { color: var(--azul); }
+  .fila-cuenta .aldia { color: #1d6b3a; }
+  .persona-cuenta .detalle-cuenta { margin: 0 0 10px; padding: 4px 12px 8px; background: var(--fondo); border-radius: 12px; border-top: 0; }
+  .dos-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .cobro-personas-cab { display: flex; justify-content: space-between; align-items: center; margin: 12px 0 6px; }
+  .cobro-personas-cab .campo { margin: 0; }
+
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
