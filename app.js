@@ -854,7 +854,8 @@ function refrescarInstalar() {
 }
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  // updateViaCache: 'none' = el celular revisa si hay un service worker nuevo sin usar copias guardadas
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
 }
 
 /* Actualiza el "Quedan X h" cada minuto sin redibujar todo (para no borrar lo que escribes) */
