@@ -43,7 +43,7 @@ const estado = {
   rechazando: null,   // id del pago que se está rechazando
   capturas: {},       // id de pago → imagen (data URL) ya cargada
   cobro: { concepto: '', monto: '', tipo: 'polo', ids: [] },
-  efectivo: { id: '', monto: '', metodo: 'Efectivo', nota: '' }
+  efectivo: { id: '', monto: '', metodo: 'Efectivo', nota: '', fecha: '' }
 };
 
 /* ---------- Íconos de línea (estilo Lucide, licencia ISC) ---------- */
@@ -830,7 +830,9 @@ function mensajePin() {
 
 const soles = n => 'S/ ' + (Math.round(n * 100) / 100).toFixed(Number.isInteger(n) ? 0 : 2);
 const ESTADO_COBRO = { pagado: 'Pagado', parcial: 'Pago parcial', pendiente: 'Pendiente', vencido: 'Vencido' };
-const ESTADO_PAGO = { pendiente: 'Por revisar', confirmado: 'Confirmado', rechazado: 'Rechazado' };
+const ESTADO_PAGO = { pendiente: 'Por revisar', confirmado: 'Confirmado', rechazado: 'Rechazado', anulado: 'Anulado' };
+/** Hoy en Lima como "2026-11-07" (para el campo de fecha). */
+const hoyLima = () => new Date(Date.now() - 5 * 3600 * 1000).toISOString().slice(0, 10);
 
 function tarjetaMiCuenta(d) {
   const s = d.miSaldo;
@@ -1016,8 +1018,8 @@ async function registrarEfectivo() {
   const monto = Number(String(f.monto).replace(',', '.'));
   if (!f.id) return aviso('Elige a la persona.');
   if (!(monto > 0)) return aviso('Escribe el monto.');
-  if (await accionTeso('registrarPago', f.id, { monto, metodo: f.metodo, nota: f.nota })) {
-    estado.efectivo = { id: '', monto: '', metodo: 'Efectivo', nota: '' };
+  if (await accionTeso('registrarPago', f.id, { monto, metodo: f.metodo, nota: f.nota, fecha: f.fecha || hoyLima() })) {
+    estado.efectivo = { id: '', monto: '', metodo: 'Efectivo', nota: '', fecha: '' };
     aviso('Pago registrado y confirmado.');
   }
 }
@@ -1114,6 +1116,8 @@ function vistaTesoreria() {
         <div><label class="campo" for="ef-metodo">Medio</label>
           <select id="ef-metodo" onchange="estado.efectivo.metodo=this.value">${t.metodos.map(m => `<option ${e.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
       </div>
+      <label class="campo" for="ef-fecha">¿Cuándo pagó? <span class="ayuda">· para pagos antiguos, pon su fecha real</span></label>
+      <input type="date" id="ef-fecha" max="${hoyLima()}" value="${esc(e.fecha || hoyLima())}" onchange="estado.efectivo.fecha=this.value" style="max-width:200px">
       <label class="campo" for="ef-nota">Nota <span class="ayuda">· opcional</span></label>
       <input type="text" id="ef-nota" maxlength="200" value="${esc(e.nota)}" oninput="estado.efectivo.nota=this.value">
       <div class="acciones"><button class="boton" ${ocupado} onclick="registrarEfectivo()">Registrar pago</button></div>

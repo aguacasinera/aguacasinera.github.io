@@ -315,6 +315,8 @@
   .e-pagado, .p-confirmado { background: #e3f4e8; color: #1d6b3a; }
   .e-parcial, .e-pendiente, .p-pendiente { background: var(--sol-suave); color: #7a5208; }
   .e-vencido, .p-rechazado { background: var(--primario-suave); color: var(--primario-oscuro); }
+  .p-anulado { background: var(--carbon-suave); color: var(--tinta-2); text-decoration: line-through; }
+  input[type=date] { width: 100%; border: 1.5px solid var(--borde); border-radius: 12px; padding: 10px 12px; background: #fbfdfd; }
   .c-pagado .cobro-fila { color: var(--tinta-2); }
   .motivo-rechazo { font-size: .86rem; color: var(--primario-oscuro); margin-top: 4px; }
   .enlace.peque { font-size: .86rem; padding: 2px 0; }
