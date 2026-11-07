@@ -838,10 +838,14 @@ function tarjetaMiCuenta(d) {
   const s = d.miSaldo;
   if (!s) return '';
   const k = estado.cuenta;
-  const cabecera = s.saldo > 0
-    ? `<p class="saldo debe"><b>${soles(s.saldo)}</b> por pagar${s.vencido ? ` · <span class="insignia sin-aviso">${soles(s.vencido)} vencido</span>` : ''}</p>`
-    : s.saldo < 0 ? `<p class="saldo afavor"><b>${soles(-s.saldo)}</b> a tu favor</p>`
-    : `<p class="saldo aldia">${icono('check')} <b>Estás al día</b></p>`;
+  // "Falta pagar" solo si hay algo vencido; la cuota del mes en curso no vence hasta fin de mes
+  const cabecera = s.vencido > 0
+    ? `<p class="saldo debe">Falta pagar <b>${soles(s.saldo)}</b></p>
+       ${desgloseFalta(s.falta)}
+       <p class="sub"><span class="insignia sin-aviso">${soles(s.vencido)} vencido</span>${s.porVencer ? ` · ${soles(s.porVencer)} ${esc(s.porVencerTexto)}` : ''}</p>`
+    : `<p class="saldo aldia">${icono('check')} <b>Cuotas al día</b></p>
+       ${s.porVencer ? `<p class="sub">Por pagar: ${soles(s.porVencer)}, ${esc(s.porVencerTexto)}.</p>` : ''}
+       ${s.saldo < 0 ? `<p class="sub">Tienes ${soles(-s.saldo)} adelantado: se usará en los próximos cobros.</p>` : ''}`;
   return `<section class="tarjeta" id="mi-cuenta">
     <h2>${icono('billetera')} Mi cuenta</h2>
     ${cabecera}
@@ -853,6 +857,14 @@ function tarjetaMiCuenta(d) {
       <button class="boton secundario" onclick="alternarCuenta()">${estado.verCuenta ? 'Ocultar detalle' : 'Ver detalle'}</button>
     </div>
   </section>`;
+}
+
+/** "Cuotas S/ 30 · Penalidades S/ 5 · Polos S/ 35" (solo lo que falta). */
+function desgloseFalta(f) {
+  if (!f) return '';
+  const partes = [['cuota', 'Cuotas'], ['penalidad', 'Penalidades'], ['polo', 'Polos'], ['otro', 'Otros']]
+    .filter(([k]) => f[k] > 0).map(([k, t]) => `${t} ${soles(f[k])}`);
+  return partes.length ? `<p class="desglose">${partes.join(' · ')}</p>` : '';
 }
 
 /** Lista de cobros y pagos. editable = Tesorería puede anular cobros hechos a mano. */
@@ -867,7 +879,9 @@ function detalleCuenta(k, editable) {
   const pagos = k.pagos.length ? k.pagos.map(p => `
       <li class="pago-fila">
         <div class="cobro-fila"><span>${esc(p.metodo)} · ${esc(cuando(p.fecha))}</span><b>${soles(p.monto)}</b></div>
-        <div class="cobro-estado"><span class="chip-estado p-${p.estado}">${ESTADO_PAGO[p.estado]}</span>
+        <div class="cobro-estado">${p.historial && p.estado === 'confirmado'
+            ? `<span class="chip-estado p-historial">Antes de ${esc(k.desdeTexto.split(' ')[0])} · no cuenta</span>`
+            : `<span class="chip-estado p-${p.estado}">${ESTADO_PAGO[p.estado]}</span>`}
           ${p.revisadoPor && p.estado !== 'pendiente' ? `<small>por ${esc(p.revisadoPor)}</small>` : ''}
           ${p.nota ? `<small>${esc(p.nota)}</small>` : ''}</div>
         ${p.motivoRechazo ? `<p class="motivo-rechazo">Motivo: ${esc(p.motivoRechazo)}</p>` : ''}
@@ -875,7 +889,8 @@ function detalleCuenta(k, editable) {
   return `<div class="detalle-cuenta">
     <h3>Cobros</h3><ul class="cobros">${cobros}</ul>
     <h3>Pagos</h3><ul class="cobros">${pagos}</ul>
-    <p class="sub">Los pagos se aplican a lo más antiguo primero. Total cobrado ${soles(k.totalCobrado)} · pagado ${soles(k.totalPagado)}.</p>
+    <p class="sub">Se cobra desde ${esc(k.desdeTexto)}. Cada pago cuenta para su mes; los que no indican mes van a lo más antiguo.
+      Total cobrado ${soles(k.totalCobrado)} · pagado ${soles(k.totalPagado)}.</p>
   </div>`;
 }
 
@@ -1073,8 +1088,9 @@ function vistaTesoreria() {
     const abierta = estado.tesoCuenta && estado.tesoCuenta.id === p.id;
     return `<li class="persona-cuenta">
       <button class="fila-cuenta" aria-expanded="${String(abierta)}" onclick="abrirPersona('${esc(p.id)}')">
-        <span>${esc(p.nombre)}${p.porRevisar ? ` <span class="insignia tarde">${p.porRevisar} por revisar</span>` : ''}</span>
-        <b class="${p.saldo > 0 ? (p.vencido ? 'debe-vencido' : 'debe') : p.saldo < 0 ? 'afavor' : 'aldia'}">${p.saldo > 0 ? soles(p.saldo) : p.saldo < 0 ? soles(-p.saldo) + ' a favor' : 'Al día'}</b>
+        <span class="nombre-cuenta">${esc(p.nombre)}${p.porRevisar ? ` <span class="insignia tarde">${p.porRevisar} por revisar</span>` : ''}
+          ${p.vencido > 0 ? desgloseFalta(p.falta) : p.porVencer ? `<span class="desglose">Mes en curso ${soles(p.porVencer)} por pagar</span>` : ''}</span>
+        <b class="${p.vencido > 0 ? 'debe' : 'aldia'}">${p.vencido > 0 ? 'Falta pagar ' + soles(p.saldo) : icono('check') + ' Cuotas al día'}</b>
       </button>
       ${abierta ? (estado.tesoCuenta.datos ? detalleCuenta(estado.tesoCuenta.datos, true) : '<p class="sub">Cargando…</p>') : ''}
     </li>`;
@@ -1084,6 +1100,7 @@ function vistaTesoreria() {
   return `
     <section class="tarjeta">
       <h2>${icono('billetera')} Tesorería</h2>
+      <p class="sub" style="margin:-6px 0 10px">Cuotas desde ${esc(t.desdeTexto)} hasta hoy.</p>
       <div class="cifras">
         <div><b>${soles(t.porCobrar)}</b><small>Por cobrar</small></div>
         <div><b>${soles(t.vencido)}</b><small>Vencido</small></div>
@@ -1098,7 +1115,7 @@ function vistaTesoreria() {
 
     <section class="tarjeta">
       <h2>Cuentas por persona</h2>
-      <p class="sub" style="margin-bottom:8px">Ordenado de mayor a menor deuda. Toca un nombre para ver el detalle.</p>
+      <p class="sub" style="margin-bottom:8px">Primero quienes tienen pagos vencidos. Toca un nombre para ver el detalle.</p>
       <ul class="cuentas">${personas}</ul>
     </section>
 
