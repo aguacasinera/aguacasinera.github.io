@@ -136,7 +136,7 @@
   .boton.peligro:hover { background: var(--primario-suave); }
   .boton.secundario { background: transparent; color: var(--tinta); border: 1.5px solid var(--borde); }
   .boton.secundario:hover { background: var(--carbon-suave); }
-  .boton.ancho { width: 100%; }
+  .boton.ancho { width: 100%; white-space: normal; text-align: center; line-height: 1.3; } /* textos largos: que bajen de línea */
   .boton[disabled] { opacity: .6; cursor: wait; }
   .enlace { background: none; border: 0; color: var(--azul); font-weight: 700; cursor: pointer; padding: 6px 0;
             text-decoration: underline; text-underline-offset: 3px; }
@@ -204,5 +204,94 @@
   .instalar .sub { display: block; }
   .version { border: 0 !important; margin: 6px 0 0 !important; padding: 6px 10px 0 !important; font-size: .8rem !important; }
   body { padding-top: env(safe-area-inset-top); }
+
+  /* ============ Fase 2 · Mi asistencia ============ */
+  .mi-cifra { margin-bottom: 10px; color: var(--tinta-2); }
+  .mi-cifra b { font-family: var(--titulos); font-size: 1.6rem; color: var(--tinta); }
+  .historial { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .historial li { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; border-radius: 12px;
+                  background: var(--fondo); font-size: .82rem; text-align: center; }
+  .historial li span { font-weight: 700; }
+  .historial li small { color: var(--tinta-2); }
+  .historial .icono { width: 20px; height: 20px; }
+  .historial .h-presente .icono { color: var(--primario); }
+  .historial .h-tarde .icono { color: #a66d00; }
+  .historial .h-falta .icono { color: var(--carbon); }
+
+  /* ============ Fase 2 · Pasar lista ============ */
+  .lista-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .lista-cabecera h2 { margin: 0; display: flex; gap: 8px; align-items: center; }
+  .guardado { font-size: .85rem; font-weight: 700; border-radius: 999px; padding: 3px 10px; border: 0; white-space: nowrap; }
+  .guardado.ok { color: #1d6b3a; background: #e3f4e8; display: inline-flex; gap: 4px; align-items: center; }
+  .guardado.ocupado { color: var(--tinta-2); background: var(--carbon-suave); }
+  .guardado.error { color: var(--primario-oscuro); background: var(--primario-suave); cursor: pointer; }
+  .cifras.cuatro { grid-template-columns: repeat(4, 1fr); }
+  .cifras.cuatro b { font-size: 1.3rem; }
+
+  .lista-personas { padding: 4px 14px; }
+  .persona { padding: 12px 0; border-bottom: 1px solid var(--borde); }
+  .persona:last-child { border-bottom: 0; }
+  .persona-info { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-bottom: 8px; }
+  .persona-info strong { flex-basis: 100%; }
+  .nota { font-size: .84rem; color: var(--tinta-2); display: inline-flex; gap: 4px; align-items: center; }
+  .nota .icono { width: 14px; height: 14px; }
+  .nota.voy { color: var(--primario-oscuro); }
+  .nota.motivo { flex-basis: 100%; font-style: italic; }
+  .marcas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .marcas button { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 42px;
+                   border: 1.5px solid var(--borde); background: var(--superficie); border-radius: 10px;
+                   font-weight: 700; font-size: .9rem; color: var(--tinta-2); cursor: pointer; }
+  .marcas button .icono { width: 16px; height: 16px; }
+  .marcas .marca-presente[aria-pressed="true"] { background: var(--primario); border-color: var(--primario); color: #fff; }
+  .marcas .marca-tarde[aria-pressed="true"] { background: var(--sol); border-color: var(--sol); color: #2b1d00; }
+  .marcas .marca-falta[aria-pressed="true"] { background: var(--carbon); border-color: var(--carbon); color: #fff; }
+  .persona:not([class*="p-"]) .persona-info strong::after { content: ' · sin marcar'; font-weight: 400; color: var(--tinta-2); font-size: .85rem; }
+
+  /* ============ Fase 2 · Resumen del mes ============ */
+  .mes-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .mes-nav h2 { margin: 0; text-align: center; flex: 1; }
+  .mes-nav h2::first-letter { text-transform: uppercase; }
+  .resumen-lista { list-style: none; margin: 0; padding: 0; }
+  .resumen-lista li { padding: 10px 0; border-bottom: 1px dashed var(--borde); }
+  .resumen-lista li:last-child { border-bottom: 0; }
+  .r-fila { display: flex; justify-content: space-between; align-items: baseline; }
+  .r-pct { font-family: var(--titulos); font-weight: 800; }
+  .r-barra { height: 8px; border-radius: 999px; background: var(--carbon-suave); overflow: hidden; margin: 6px 0 4px; }
+  .r-barra span { display: block; height: 100%; background: var(--primario); }
+  .r-detalle { font-size: .84rem; color: var(--tinta-2); }
+  .insignia.sin-aviso { background: var(--carbon); color: #fff; }
+
+  /* ============ v1.8 · Llego tarde, emergencias y penalidades ============ */
+  .eleccion.tres { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .eleccion.tres .opcion { padding: 16px 6px; font-size: .98rem; }
+  .opcion.llegotarde { color: #8a5a00; }
+  .opcion.llegotarde:hover { border-color: var(--sol); background: var(--sol-suave); }
+  .estado.llegotarde { background: var(--sol-suave); }
+  .estado.llegotarde .circulo { background: #b07a00; }
+  .estado .insignia { margin-top: 6px; display: inline-block; }
+  .barra-asistencia .b-tarde { background: var(--sol); }
+  .insignia.ok { background: #e3f4e8; color: #1d6b3a; }
+  .aviso-plazo { background: var(--primario-suave); border-radius: 12px; padding: 12px 14px; margin-top: 12px; }
+  .aviso-plazo p { margin-bottom: 8px; font-size: .94rem; }
+  .dejar-wa { border-top: 1px dashed var(--borde); margin-top: 12px; padding-top: 12px; }
+  .dejar-wa .acciones { margin-top: 8px; }
+
+  .nota.llegotarde { color: #8a5a00; }
+  .nota.esperada { flex-basis: 100%; color: var(--azul); font-weight: 700; }
+  .emergencia { background: var(--sol-suave); border: 1px solid #f0d28c; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .emergencia p { font-size: .9rem; }
+  .decidir { display: flex; gap: 8px; margin-top: 8px; }
+  .mini[aria-pressed="true"] { background: var(--tinta); border-color: var(--tinta); color: #fff; }
+  .resultado { display: inline-block; margin-top: 8px; font-size: .84rem; font-weight: 700; border-radius: 8px; padding: 3px 9px; }
+  .resultado.multa { background: var(--primario-suave); color: var(--primario-oscuro); }
+  .resultado.ok { background: #e3f4e8; color: #1d6b3a; }
+  .resultado.pend { background: var(--carbon-suave); color: var(--tinta-2); }
+
+  .historial em { font-style: normal; font-weight: 700; font-size: .78rem; color: var(--primario-oscuro); }
+  .historial em.pend { color: #8a5a00; }
+  .penalidad-mes { margin-top: 12px; background: var(--primario-suave); border-radius: 12px; padding: 10px 14px; color: var(--primario-oscuro); }
+  .penalidad-mes .sub { color: var(--tinta-2); font-size: .85rem; }
+  .total-penalidades { text-align: center; margin-bottom: 8px; }
+  .multa-texto { color: var(--primario-oscuro); }
 
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

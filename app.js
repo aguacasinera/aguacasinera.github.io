@@ -12,8 +12,10 @@ const estado = {
   token: leerToken(),
   datos: null,        // lo que devuelve inicio() en Codigo.gs
   vista: 'inicio',    // 'inicio' | 'directiva'
-  editando: null,     // null | 'elegir' | 'motivo'
+  editando: null,     // null | 'elegir' | 'llego_tarde' | 'no_voy'
   motivo: '',
+  hora: '',           // "18:30" mientras se llena "Llego tarde"
+  emergencia: false,
   ocupado: false,
   menu: false,
   pinNuevo: null,     // { nombre, pin } después de crear o reiniciar
@@ -22,7 +24,16 @@ const estado = {
   nuevoCorreo: '',
   nombres: [],
   errorAcceso: '',
-  instalar: null      // evento de Chrome para mostrar "Instalar app"
+  instalar: null,     // evento de Chrome para mostrar "Instalar app"
+  // Fase 2 · pasar lista
+  lista: null,        // lo que devuelve listaAsistencia()
+  cargandoLista: false,
+  cambios: {},        // marcas tocadas que todavía no se guardan { idMiembro: estado }
+  guardando: false,
+  errorGuardar: false,
+  temporizador: null,
+  confirmarCierre: false,
+  resumen: null       // lo que devuelve resumenAsistencia()
 };
 
 /* ---------- Íconos de línea (estilo Lucide, licencia ISC) ---------- */
@@ -41,6 +52,10 @@ const ICONOS = {
   agregar: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>',
   llave: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
   cancelar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="m14 14-4 4"/><path d="m10 14 4 4"/>',
+  reloj2: '<path d="M12 6v6h4"/><circle cx="12" cy="12" r="10"/>',
+  lista: '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>',
+  izq: '<path d="m15 18-6-6 6-6"/>',
+  der: '<path d="m9 18 6-6-6-6"/>',
   candado: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   descargar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'
 };
@@ -139,6 +154,7 @@ async function mostrarAcceso() {
 function cerrarSesion() {
   guardarToken(null);
   estado.token = null; estado.menu = false; estado.vista = 'inicio';
+  estado.lista = null; estado.resumen = null; estado.cambios = {};
   mostrarAcceso();
 }
 
@@ -223,8 +239,12 @@ function pintarAcceso() {
 function pintar() {
   const d = estado.datos;
   if (!d) return;
-  const esAdmin = !!d.admin;
-  if (!esAdmin) estado.vista = 'inicio';
+  const permisos = d.permisos || { lista: false, directiva: !!d.admin };
+  const pestanas = [['inicio', 'Inicio']];
+  if (permisos.lista) pestanas.push(['lista', 'Lista']);
+  if (permisos.directiva && d.admin) pestanas.push(['directiva', 'Directiva']);
+  if (!pestanas.some(p => p[0] === estado.vista)) estado.vista = 'inicio';
+  const rolTexto = d.yo.rol === 'admin' ? 'Directiva' : (permisos.lista ? 'Talleres' : 'Miembro');
 
   document.getElementById('app').innerHTML = `
     <header class="barra">
@@ -232,22 +252,19 @@ function pintar() {
       <button class="avatar" aria-label="Mi cuenta" aria-expanded="${String(estado.menu)}"
               onclick="estado.menu=!estado.menu;pintar()">${esc(d.yo.nombre.charAt(0).toUpperCase())}</button>
       ${estado.menu ? `<div class="menu">
-          <p><strong>${esc(d.yo.nombre)}</strong>${d.yo.rol === 'admin' ? 'Directiva' : 'Miembro'}</p>
+          <p><strong>${esc(d.yo.nombre)}</strong>${rolTexto}</p>
           ${estado.instalar ? `<button class="enlace" onclick="instalarApp()">${icono('descargar')} Instalar app</button><br>` : ''}
           <button class="enlace" onclick="cerrarSesion()">${icono('salir')} Cerrar sesión</button>
           <p class="version">Versión ${esc(CONFIG.VERSION)}</p>
         </div>` : ''}
     </header>
-    ${esAdmin ? `<nav class="pestanas" role="tablist">
-        <button role="tab" aria-selected="${String(estado.vista === 'inicio')}" onclick="estado.vista='inicio';pintar()">Inicio</button>
-        <button role="tab" aria-selected="${String(estado.vista === 'directiva')}" onclick="estado.vista='directiva';pintar()">Directiva</button>
+    ${pestanas.length > 1 ? `<nav class="pestanas" role="tablist">
+        ${pestanas.map(([id, texto]) => `<button role="tab" aria-selected="${String(estado.vista === id)}"
+            onclick="irA('${id}')">${texto}</button>`).join('')}
       </nav>` : ''}
-    ${estado.vista === 'inicio' ? vistaInicio(d) : vistaDirectiva(d)}`;
+    ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'directiva' ? vistaDirectiva(d) : vistaInicio(d)}`;
 
-  if (estado.editando === 'motivo') {
-    const t = document.getElementById('motivo');
-    if (t) { t.value = estado.motivo; t.focus(); }
-  }
+  if (estado.editando === 'llego_tarde' && !estado.hora) document.getElementById('hora')?.focus();
 }
 
 function tarjetaEnsayo(e) {
@@ -270,44 +287,109 @@ function bloquePlazo(e) {
   if (e.estado === 'cancelado' || e.empezo) return '';
   if (e.cerrado) {
     return `<div class="plazo cerrado">${icono('candado')}<div>
-      <strong>El plazo para avisar ya cerró</strong>
-      Si no puedes ir, avisa igual: quedará registrado como aviso tarde.</div></div>`;
+      <strong>El plazo para avisar cerró el ${esc(e.cierreDia)}</strong>
+      Desde ahora, un aviso de tardanza o falta cuenta como <b>injustificado</b>, salvo una emergencia real (la directiva decide).</div></div>`;
   }
   if (e.esDiaCierre) {
     return `<div class="plazo urgente" role="alert">${icono('campana')}<div>
-      <strong>Hoy ${esc(e.cierreDia)} es el último día para avisar si no vas</strong>
+      <strong>Hoy ${esc(e.cierreDia)} vence el plazo para avisar tardanza o falta</strong>
       <span id="cuenta">${esc(tiempoRestante(e.cierreISO))}</span>${tiempoRestante(e.cierreISO) ? ' · ' : ''}cierra a las 11:59&nbsp;p.&nbsp;m.</div></div>`;
   }
   return `<div class="plazo">${icono('campana')}<div>
-    <strong>Puedes avisar hasta el ${esc(e.cierreTexto)}</strong>
-    Si no vas, avísalo antes para organizar las parejas.</div></div>`;
+    <strong>Avisa tardanza o falta hasta el ${esc(e.cierreTexto)}</strong>
+    Después cuenta como injustificada: tardanza S/&nbsp;5, falta S/&nbsp;15.</div></div>`;
+}
+
+/** Fecha y hora de Lima legibles: "vie 6 nov, 10:32 p. m." (Perú no cambia de hora: UTC−5). */
+function cuando(iso) {
+  const d = new Date(new Date(iso).getTime() - 5 * 3600 * 1000);
+  if (isNaN(d)) return '';
+  const dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'set', 'oct', 'nov', 'dic'];
+  const h = d.getUTCHours(), m = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${dias[d.getUTCDay()]} ${d.getUTCDate()} ${meses[d.getUTCMonth()]}, ${(h % 12) || 12}:${m} ${h < 12 ? 'a. m.' : 'p. m.'}`;
+}
+
+/** Texto para dejar el aviso también en WhatsApp ("mensajes importantes"). */
+function mensajeAviso(d) {
+  const r = d.miRespuesta, e = d.ensayo;
+  const que = r.respuesta === 'llego_tarde' ? `llegaré a las ${r.horaTexto.replace(/ /g, ' ')}` : 'no asistiré';
+  return `${r.emergencia ? '🚨 EMERGENCIA · ' : '📌 '}Aviso para el ensayo del ${e.fechaTexto}\n` +
+         `${d.yo.nombre}: ${que}${que.endsWith('.') ? '' : '.'}` + (r.motivo ? `\nMotivo: ${r.motivo}` : '') +
+         `\n(Registrado en la app: ${cuando(r.actualizado)})`;
+}
+
+/** Insignia del aviso: a tiempo, fuera de plazo o emergencia (y lo que decidió la directiva). */
+function insigniaAviso(r) {
+  if (r.emergencia) {
+    const t = { '': 'Emergencia · por decidir', aceptada: 'Emergencia · justificada', rechazada: 'Emergencia · no justificada' }[r.decision || ''];
+    return `<span class="insignia ${r.decision === 'rechazada' ? 'sin-aviso' : r.decision === 'aceptada' ? 'ok' : 'tarde'}">${t}</span>`;
+  }
+  if (r.tarde) return `<span class="insignia sin-aviso">Fuera de plazo · injustificado</span>`;
+  return `<span class="insignia ok">A tiempo</span>`;
+}
+
+/** Formulario de "Llego tarde" o "No voy". Después del cierre ofrece marcarlo como emergencia. */
+function formularioAviso(d, tipo) {
+  const e = d.ensayo, ocupado = estado.ocupado ? 'disabled' : '';
+  const tarde = tipo === 'llego_tarde';
+  const necesitaMotivo = e.cerrado && estado.emergencia;
+  return `<section class="tarjeta">
+    <h2>${icono(tarde ? 'reloj2' : 'x')} ${tarde ? 'Llegarás tarde' : 'No vas al ensayo'}</h2>
+    ${tarde ? `<label class="campo" for="hora">¿A qué hora llegarás? <span class="ayuda">· la llegada general es a las ${esc(e.horario.split(' a ')[0])}</span></label>
+      <input type="time" id="hora" min="${esc(e.inicio)}" step="300" value="${esc(estado.hora)}" oninput="estado.hora=this.value"
+             style="max-width:180px;margin-bottom:12px">` : ''}
+    <label class="campo" for="motivo">Motivo <span class="ayuda">· ${necesitaMotivo ? 'obligatorio para una emergencia' : 'opcional'}; solo lo ve la directiva</span></label>
+    <textarea id="motivo" maxlength="300" placeholder="${tarde ? 'Ej.: salgo del trabajo a las 6' : 'Ej.: tengo turno en el trabajo'}"
+              oninput="estado.motivo=this.value">${esc(estado.motivo)}</textarea>
+    ${e.cerrado ? `
+      <div class="aviso-plazo">
+        <p><strong>El plazo cerró el ${esc(e.cierreDia)}.</strong> Este aviso queda registrado, pero cuenta como
+        <b>${tarde ? 'tardanza' : 'falta'} injustificada (S/&nbsp;${tarde ? 5 : 15})</b>${tarde ? ' si llegas después de la llegada general' : ''}.</p>
+        <label class="check"><input type="checkbox" ${estado.emergencia ? 'checked' : ''}
+            onchange="estado.emergencia=this.checked;pintar()">
+          <span>Es una <b>emergencia real</b> <span class="ayuda">· la directiva revisará tu motivo y decidirá si la justifica</span></span></label>
+      </div>` : ''}
+    <div class="acciones">
+      <button class="boton secundario" onclick="estado.editando=null;pintar()">Volver</button>
+      <button class="boton oscuro" ${ocupado} onclick="enviarAviso('${tipo}')">${icono('enviar')} Enviar aviso</button>
+    </div></section>`;
+}
+
+function enviarAviso(tipo) {
+  const e = estado.datos.ensayo;
+  if (tipo === 'llego_tarde' && !estado.hora) return aviso('Elige a qué hora llegarás.');
+  if (e.cerrado && estado.emergencia && estado.motivo.trim().length < 5) return aviso('Cuenta brevemente cuál es la emergencia.');
+  accion('responder', { respuesta: tipo, motivo: estado.motivo, horaLlegada: tipo === 'llego_tarde' ? estado.hora : '',
+                        emergencia: !!(e.cerrado && estado.emergencia) });
+}
+
+/** Abre el formulario con lo que la persona ya había avisado (para corregirlo sin reescribir todo). */
+function abrirAviso(tipo) {
+  const r = estado.datos.miRespuesta;
+  const mismo = r && r.respuesta === tipo;
+  estado.motivo = mismo ? r.motivo : '';
+  estado.hora = mismo && r.horaLlegada ? r.horaLlegada : (estado.hora || '');
+  estado.emergencia = mismo ? r.emergencia : false;
+  estado.editando = tipo;
+  pintar();
 }
 
 function tarjetaRespuesta(d) {
   const e = d.ensayo, r = d.miRespuesta, ocupado = estado.ocupado ? 'disabled' : '';
   if (e.estado === 'cancelado') return '';
 
-  // 1) Escribiendo el motivo de "no voy"
-  if (estado.editando === 'motivo') {
-    return `<section class="tarjeta">
-      <h2>${icono('x')} No vas al ensayo</h2>
-      <label class="campo" for="motivo">Motivo <span class="ayuda">· opcional, solo lo ve la directiva</span></label>
-      <textarea id="motivo" maxlength="300" placeholder="Ej.: tengo turno en el trabajo"
-                oninput="estado.motivo=this.value"></textarea>
-      <div class="acciones">
-        <button class="boton secundario" onclick="estado.editando=null;pintar()">Volver</button>
-        <button class="boton oscuro" ${ocupado} onclick="accion('responder',{respuesta:'no_voy',motivo:estado.motivo})">
-          ${icono('enviar')} Enviar aviso</button>
-      </div></section>`;
-  }
+  // 1) Llenando "Llego tarde" o "No voy"
+  if (estado.editando === 'llego_tarde' || estado.editando === 'no_voy') return formularioAviso(d, estado.editando);
 
   // 2) Sin responder, o tocó "Cambiar"
   if (!r || estado.editando === 'elegir') {
     return `<section class="tarjeta">
       <h2>¿Vas a ir?</h2>
-      <div class="eleccion">
+      <div class="eleccion tres">
         <button class="opcion voy" ${ocupado} onclick="accion('responder',{respuesta:'voy',social:''})">${icono('check')} Voy</button>
-        <button class="opcion novoy" ${ocupado} onclick="estado.motivo='';estado.editando='motivo';pintar()">${icono('x')} No voy</button>
+        <button class="opcion llegotarde" ${ocupado} onclick="abrirAviso('llego_tarde')">${icono('reloj2')} Llego tarde</button>
+        <button class="opcion novoy" ${ocupado} onclick="abrirAviso('no_voy')">${icono('x')} No voy</button>
       </div>
       ${r ? `<button class="enlace" style="margin-top:10px" onclick="estado.editando=null;pintar()">Dejar mi respuesta como estaba</button>` : ''}
     </section>`;
@@ -315,33 +397,50 @@ function tarjetaRespuesta(d) {
 
   // 3) Ya respondió
   const cambiar = `<button class="enlace" onclick="estado.editando='elegir';pintar()">Cambiar mi respuesta</button>`;
+  const chip = (valor, texto) => `<button class="chip" ${ocupado} aria-pressed="${String(r.social === valor)}"
+      onclick="accion('responder',{respuesta:'${r.respuesta}',social:'${valor}',motivo:estado.datos.miRespuesta.motivo,horaLlegada:'${esc(r.horaLlegada || '')}'})">${r.social === valor ? icono('check') : ''}${texto}</button>`;
+  const social = e.social ? `<p class="pregunta">¿Te quedas al social?</p>
+      <div class="chips">${chip('si', 'Sí')}${chip('no', 'No')}${chip('quizas', 'Aún no sé')}</div>` : '';
+  const whatsapp = `<div class="dejar-wa">
+      <p class="sub">Para que quede también en <b>mensajes importantes</b> de WhatsApp:</p>
+      <div class="acciones">
+        <a class="boton secundario" target="_blank" rel="noopener" href="${URL_WHATSAPP}${encodeURIComponent(mensajeAviso(d))}">${icono('enviar')} Abrir WhatsApp</a>
+        <button class="boton secundario" onclick="copiar(mensajeAviso(estado.datos))">${icono('copiar')} Copiar</button>
+      </div></div>`;
+
   if (r.respuesta === 'voy') {
-    const chip = (valor, texto) => `<button class="chip" ${ocupado} aria-pressed="${String(r.social === valor)}"
-        onclick="accion('responder',{respuesta:'voy',social:'${valor}'})">${r.social === valor ? icono('check') : ''}${texto}</button>`;
     return `<section class="tarjeta">
       <div class="estado voy"><span class="circulo">${icono('check')}</span>
-        <div><strong>Vas al ensayo</strong><span class="sub">¡Nos vemos el ${esc(e.fechaTexto.split(' ')[0])}!</span></div></div>
-      ${e.social ? `<p class="pregunta">¿Te quedas al social?</p>
-        <div class="chips">${chip('si', 'Sí')}${chip('no', 'No')}${chip('quizas', 'Aún no sé')}</div>` : ''}
-      <div style="margin-top:10px">${cambiar}</div></section>`;
+        <div><strong>Vas al ensayo</strong><span class="sub">Llegada: ${esc(e.horario.split(' a ')[0])}. ¡Nos vemos!</span></div></div>
+      ${social}<div style="margin-top:10px">${cambiar}</div></section>`;
+  }
+  if (r.respuesta === 'llego_tarde') {
+    return `<section class="tarjeta">
+      <div class="estado llegotarde"><span class="circulo">${icono('reloj2')}</span>
+        <div><strong>Llegas a las ${esc(r.horaTexto)}</strong>
+        <span class="sub">${r.motivo ? 'Motivo: ' + esc(r.motivo) : 'Sin motivo'}</span>
+        ${insigniaAviso(r)}</div></div>
+      <p class="sub">Si llegas después de esa hora, cuenta como tardanza.</p>
+      ${social}${whatsapp}<div style="margin-top:6px">${cambiar}</div></section>`;
   }
   return `<section class="tarjeta">
     <div class="estado novoy"><span class="circulo">${icono('x')}</span>
       <div><strong>Avisaste que no vas</strong>
       <span class="sub">${r.motivo ? 'Motivo: ' + esc(r.motivo) : 'Sin motivo'}</span>
-      ${r.tarde ? ' <span class="insignia tarde">Aviso tarde</span>' : ''}</div></div>
-    ${cambiar}</section>`;
+      ${insigniaAviso(r)}</div></div>
+    ${whatsapp}<div style="margin-top:6px">${cambiar}</div></section>`;
 }
 
 function tarjetaResumen(s) {
   const pct = n => s.total ? (n / s.total * 100).toFixed(1) + '%' : '0';
   return `<section class="tarjeta">
     <h2>${icono('personas')} Cómo va el grupo</h2>
-    <div class="barra-asistencia" role="img" aria-label="${s.voy} van, ${s.noVoy} no van, ${s.sinResponder} sin responder">
-      <span class="b-voy" style="width:${pct(s.voy)}"></span><span class="b-novoy" style="width:${pct(s.noVoy)}"></span>
+    <div class="barra-asistencia" role="img" aria-label="${s.voy} van, ${s.llegaTarde} llegan tarde, ${s.noVoy} no van, ${s.sinResponder} sin responder">
+      <span class="b-voy" style="width:${pct(s.voy)}"></span><span class="b-tarde" style="width:${pct(s.llegaTarde)}"></span><span class="b-novoy" style="width:${pct(s.noVoy)}"></span>
     </div>
-    <div class="cifras">
+    <div class="cifras cuatro">
       <div><b>${s.voy}</b><small>Van</small></div>
+      <div><b>${s.llegaTarde}</b><small>Llegan tarde</small></div>
       <div><b>${s.noVoy}</b><small>No van</small></div>
       <div><b>${s.sinResponder}</b><small>Sin responder</small></div>
     </div></section>`;
@@ -349,7 +448,257 @@ function tarjetaResumen(s) {
 
 function vistaInicio(d) {
   return tarjetaEnsayo(d.ensayo) + bloquePlazo(d.ensayo) + tarjetaRespuesta(d) +
-    (d.ensayo.estado === 'cancelado' ? '' : tarjetaResumen(d.resumen));
+    (d.ensayo.estado === 'cancelado' ? '' : tarjetaResumen(d.resumen)) + tarjetaMiAsistencia(d.miAsistencia);
+}
+
+/** Cambia de pestaña. La lista y el resumen se piden recién la primera vez que se abren. */
+async function irA(vista) {
+  if (estado.vista === 'lista' && vista !== 'lista') await guardarCambios();
+  estado.vista = vista; estado.menu = false;
+  pintar();
+  if (vista === 'lista' && !estado.lista) { cargarLista(); cargarResumen(); }
+}
+
+/* ============================================================
+ *  FASE 2 · MI ASISTENCIA (todos) y PASAR LISTA (directiva y Talleres)
+ * ============================================================ */
+
+const ESTADOS = {
+  presente: { texto: 'Presente', corto: 'Presente', icono: 'check' },
+  tarde:    { texto: 'Llegó tarde', corto: 'Tarde', icono: 'reloj2' },
+  falta:    { texto: 'Faltó', corto: 'Falta', icono: 'x' }
+};
+
+function tarjetaMiAsistencia(m) {
+  if (!m || !m.ultimos || !m.ultimos.length) return '';
+  return `<section class="tarjeta">
+    <h2>${icono('lista')} Mi asistencia</h2>
+    ${m.total ? `<p class="mi-cifra"><b>${m.asistidos}</b> de ${m.total} ensayos en ${esc(m.mesTexto)}</p>` : ''}
+    <ul class="historial">${m.ultimos.map(u => `
+      <li class="h-${esc(u.estado)}" title="${esc(u.texto)}">${icono(ESTADOS[u.estado].icono)}<span>${esc(u.fecha)}</span>
+        <small>${ESTADOS[u.estado].corto}</small>${u.monto ? `<em>S/ ${u.monto}</em>` : u.porDecidir ? '<em class="pend">Por decidir</em>' : ''}</li>`).join('')}
+    </ul>
+    ${m.penalidadMes ? `<p class="penalidad-mes"><b>Penalidades de ${esc(m.mesTexto)}: S/ ${m.penalidadMes}</b><br>
+      <span class="sub">Págalas a Tesorería. Tardanza S/ 5 y falta S/ 15, solo cuando no son justificadas.</span></p>` : ''}
+    </section>`;
+}
+
+async function cargarLista(fecha) {
+  await guardarCambios();
+  estado.cargandoLista = true; estado.confirmarCierre = false; pintar();
+  try { estado.lista = await api('listaAsistencia', estado.token, fecha || ''); }
+  catch (e) { if (mensajeError(e).includes('SESION')) return cerrarSesion(); aviso(mensajeError(e)); }
+  estado.cargandoLista = false; pintar();
+}
+
+async function cargarResumen(mes) {
+  try { estado.resumen = await api('resumenAsistencia', estado.token, mes || ''); pintar(); }
+  catch (e) { aviso(mensajeError(e)); }
+}
+
+/** Tocar un estado: cambia en pantalla al instante y se guarda solo, juntando varios toques. */
+function marcar(id, valor) {
+  const p = estado.lista.personas.find(x => x.id === id);
+  p.asistencia = p.asistencia === valor ? '' : valor;   // tocar el mismo otra vez lo borra
+  p.incidencia = null;                                  // la penalidad la recalcula el servidor al guardar
+  estado.cambios[id] = p.asistencia;
+  programarGuardado();
+  pintar();
+}
+
+function marcarVarios(filtro, valor) {
+  estado.lista.personas.filter(filtro).forEach(p => { p.asistencia = valor; p.incidencia = null; estado.cambios[p.id] = valor; });
+  estado.confirmarCierre = false;
+  programarGuardado();
+  pintar();
+}
+
+function programarGuardado() {
+  clearTimeout(estado.temporizador);
+  estado.temporizador = setTimeout(guardarCambios, 1200);
+}
+
+async function guardarCambios() {
+  clearTimeout(estado.temporizador);
+  if (estado.guardando || !estado.lista || !Object.keys(estado.cambios).length) return;
+  const lote = estado.cambios, ensayoId = estado.lista.ensayoId;
+  estado.cambios = {}; estado.guardando = true; estado.errorGuardar = false; pintarEstadoGuardado();
+  try {
+    mezclarLista(await api('guardarAsistencia', estado.token, ensayoId, lote));
+    cargarResumen(estado.resumenMes);  // el resumen cambió: se vuelve a pedir
+  } catch (e) {
+    estado.cambios = Object.assign(lote, estado.cambios);   // no se pierde nada: se reintenta
+    estado.errorGuardar = true;
+    aviso('No se pudo guardar: ' + mensajeError(e));
+  }
+  estado.guardando = false;
+  if (estado.vista === 'lista') pintar(); else pintarEstadoGuardado();
+  if (Object.keys(estado.cambios).length && !estado.errorGuardar) programarGuardado();
+}
+
+/**
+ * El servidor devuelve la lista con las penalidades recalculadas. Si mientras tanto se tocaron
+ * otras personas, se respeta lo tocado en pantalla (todavía no se guardó).
+ */
+function mezclarLista(nueva) {
+  if (estado.lista && nueva.ensayoId === estado.lista.ensayoId) {
+    nueva.personas.forEach(p => {
+      if (!(p.id in estado.cambios)) return;
+      const local = estado.lista.personas.find(x => x.id === p.id);
+      if (local) { p.asistencia = local.asistencia; p.incidencia = null; }
+    });
+  }
+  estado.lista = nueva;
+}
+
+/** La directiva justifica (o no) una emergencia avisada fuera de plazo. */
+async function decidir(id, decision) {
+  await guardarCambios();
+  try {
+    mezclarLista(await api('decidirEmergencia', estado.token, estado.lista.ensayoId, id, decision));
+    cargarResumen(estado.resumenMes);
+  } catch (e) { aviso(mensajeError(e)); }
+  pintar();
+}
+
+/** Solo actualiza el texto "Guardando… / Guardado" (sin redibujar toda la lista). */
+function pintarEstadoGuardado() {
+  const el = document.getElementById('estado-guardado');
+  if (el) el.outerHTML = textoGuardado();
+}
+function textoGuardado() {
+  const pendientes = Object.keys(estado.cambios).length;
+  if (estado.guardando) return `<span id="estado-guardado" class="guardado ocupado">Guardando…</span>`;
+  if (estado.errorGuardar) return `<button id="estado-guardado" class="guardado error" onclick="estado.errorGuardar=false;guardarCambios()">Sin guardar · Reintentar</button>`;
+  if (pendientes) return `<span id="estado-guardado" class="guardado ocupado">Guardando…</span>`;
+  return `<span id="estado-guardado" class="guardado ok">${icono('check')} Guardado</span>`;
+}
+
+window.addEventListener('beforeunload', ev => {
+  if (Object.keys(estado.cambios).length || estado.guardando) { ev.preventDefault(); ev.returnValue = ''; }
+});
+
+function vistaLista() {
+  const l = estado.lista;
+  if (!l || estado.cargandoLista) return `<div class="cargando"><span class="ola"></span>Cargando la lista…</div>`;
+  const ps = l.personas;
+  const cuenta = v => ps.filter(p => p.asistencia === v).length;
+  const sinMarcar = ps.filter(p => !p.asistencia);
+  const voySinMarcar = sinMarcar.filter(p => p.respuesta === 'voy');
+
+  const fuera = p => p.emergencia ? '' : p.avisoTarde ? ' · <b>fuera de plazo</b>' : '';
+  const nota = p => {
+    let t;
+    if (p.respuesta === 'voy') t = `<span class="nota voy">${icono('check')} Dijo que va</span>`;
+    else if (p.respuesta === 'llego_tarde') t = `<span class="nota llegotarde">${icono('reloj2')} Avisó que llega a las ${esc(p.horaAvisada)}${fuera(p)}</span>`;
+    else if (p.respuesta === 'no_voy') t = `<span class="nota novoy">${icono('x')} Avisó que no va${fuera(p)}</span>`;
+    else t = `<span class="nota">No respondió</span>`;
+    if (p.horaEsperada !== l.horaGeneral) t += `<span class="nota esperada">Se le espera a las ${esc(p.horaEsperada)}</span>`;
+    if (p.motivo && !p.emergencia) t += `<span class="nota motivo">${esc(p.motivo)}</span>`;
+    return t;
+  };
+  // Emergencia avisada fuera de plazo: la directiva decide; Talleres solo la ve
+  const emergencia = p => !p.emergencia ? '' : `
+    <div class="emergencia">
+      <p><strong>Emergencia</strong> · ${esc(p.motivo)}</p>
+      ${l.puedeDecidir ? `<div class="decidir">
+          <button class="mini" aria-pressed="${String(p.decision === 'aceptada')}" onclick="decidir('${esc(p.id)}', ${p.decision === 'aceptada' ? "''" : "'aceptada'"})">${icono('check')} Justificar</button>
+          <button class="mini" aria-pressed="${String(p.decision === 'rechazada')}" onclick="decidir('${esc(p.id)}', ${p.decision === 'rechazada' ? "''" : "'rechazada'"})">${icono('x')} No justificar</button>
+        </div>`
+      : `<p class="sub">${p.decision === 'aceptada' ? 'Justificada por la directiva' : p.decision === 'rechazada' ? 'No justificada por la directiva' : 'La directiva todavía no decide'}</p>`}
+    </div>`;
+  // Resultado de la marca: penalidad o justificación (lo calcula el servidor al guardar)
+  const resultado = p => {
+    if (!p.asistencia || p.asistencia === 'presente') return '';
+    if (!p.incidencia) return `<span class="resultado pend">Calculando…</span>`;
+    const i = p.incidencia;
+    if (i.monto) return `<span class="resultado multa">S/ ${i.monto} · ${esc(i.texto)}</span>`;
+    return `<span class="resultado ${i.tipo === 'por_decidir' ? 'pend' : 'ok'}">${esc(i.texto)}</span>`;
+  };
+  const totalPenalidades = ps.reduce((t, p) => t + (p.incidencia ? p.incidencia.monto : 0), 0);
+  const botones = p => Object.keys(ESTADOS).map(v => `
+      <button class="marca-${v}" aria-pressed="${String(p.asistencia === v)}"
+              aria-label="${esc(p.nombre)}: ${ESTADOS[v].texto}" onclick="marcar('${esc(p.id)}','${v}')">
+        ${icono(ESTADOS[v].icono)}<span>${ESTADOS[v].corto}</span></button>`).join('');
+
+  return `
+    <section class="tarjeta">
+      <div class="lista-cabecera">
+        <h2>${icono('lista')} Pasar lista</h2>
+        ${textoGuardado()}
+      </div>
+      <label class="campo" for="fecha-lista">Ensayo</label>
+      <select id="fecha-lista" onchange="cargarLista(this.value)">
+        ${l.fechas.map(f => `<option value="${esc(f.fecha)}" ${f.fecha === l.fecha ? 'selected' : ''}>${esc(f.texto)}</option>`).join('')}
+      </select>
+      ${l.cancelado ? `<p class="aviso-error" style="margin-top:12px">Este ensayo fue cancelado${l.nota ? ': ' + esc(l.nota) : ''}. No se pasa lista.</p>` : `
+      <div class="cifras cuatro" style="margin-top:14px">
+        <div><b>${cuenta('presente')}</b><small>Presentes</small></div>
+        <div><b>${cuenta('tarde')}</b><small>Tarde</small></div>
+        <div><b>${cuenta('falta')}</b><small>Faltas</small></div>
+        <div><b>${sinMarcar.length}</b><small>Sin marcar</small></div>
+      </div>
+      <p class="sub" style="margin-top:10px">Llegada general: <b>${esc(l.horaGeneral)}</b> · Penalidades de este ensayo: <b>S/ ${totalPenalidades}</b></p>
+      ${voySinMarcar.length ? `<button class="boton secundario ancho" style="margin-top:12px"
+          onclick="marcarVarios(p => !p.asistencia && p.respuesta === 'voy', 'presente')">
+          ${icono('check')} Marcar presentes a quienes dijeron que van (${voySinMarcar.length})</button>` : ''}`}
+    </section>
+    ${l.cancelado ? '' : `
+    <section class="tarjeta lista-personas">
+      ${ps.map(p => `
+        <div class="persona ${p.asistencia ? 'p-' + p.asistencia : ''}">
+          <div class="persona-info"><strong>${esc(p.nombre)}</strong>${nota(p)}</div>
+          ${emergencia(p)}
+          <div class="marcas" role="group" aria-label="Asistencia de ${esc(p.nombre)}">${botones(p)}</div>
+          ${resultado(p)}
+        </div>`).join('')}
+    </section>
+    ${sinMarcar.length ? `<section class="tarjeta">
+      ${estado.confirmarCierre
+        ? `<p><strong>¿Marcar falta a ${sinMarcar.length} ${sinMarcar.length === 1 ? 'persona' : 'personas'}?</strong></p>
+           <p class="sub">${esc(sinMarcar.map(p => p.nombre).join(', '))}</p>
+           <div class="acciones">
+             <button class="boton secundario" onclick="estado.confirmarCierre=false;pintar()">Volver</button>
+             <button class="boton oscuro" onclick="marcarVarios(p => !p.asistencia, 'falta')">Sí, marcar falta</button>
+           </div>`
+        : `<button class="boton oscuro ancho" onclick="estado.confirmarCierre=true;pintar()">
+             Terminar lista: falta a quienes no marcaste (${sinMarcar.length})</button>`}
+    </section>` : ''}`}
+    ${tarjetaResumenMes()}`;
+}
+
+function tarjetaResumenMes() {
+  const r = estado.resumen;
+  if (!r) return `<section class="tarjeta"><h2>Resumen del mes</h2><p class="sub">Cargando…</p></section>`;
+  estado.resumenMes = r.mes;
+  const filas = r.personas.slice().sort((a, b) =>
+    (a.porcentaje ?? 101) - (b.porcentaje ?? 101) || a.nombre.localeCompare(b.nombre, 'es'));
+  const detalle = p => [
+    p.tarde ? `${p.tarde} tardanza${p.tarde > 1 ? 's' : ''}` : '',
+    p.faltaJustificada ? `${p.faltaJustificada} falta${p.faltaJustificada > 1 ? 's' : ''} justificada${p.faltaJustificada > 1 ? 's' : ''}` : '',
+    p.faltaInjustificada ? `<span class="insignia sin-aviso">${p.faltaInjustificada} injustificada${p.faltaInjustificada > 1 ? 's' : ''}</span>` : '',
+    p.porDecidir ? `<span class="insignia tarde">${p.porDecidir} por decidir</span>` : '',
+    p.penalidad ? `<b class="multa-texto">S/ ${p.penalidad}</b>` : ''
+  ].filter(Boolean).join(' · ');
+  return `<section class="tarjeta">
+    <div class="mes-nav">
+      <button class="mini" aria-label="Mes anterior" onclick="cargarResumen('${r.anterior}')">${icono('izq')}</button>
+      <h2>${esc(r.mesTexto)}</h2>
+      ${r.siguiente ? `<button class="mini" aria-label="Mes siguiente" onclick="cargarResumen('${r.siguiente}')">${icono('der')}</button>` : '<span style="width:38px"></span>'}
+    </div>
+    ${!r.ensayos ? `<p class="sub">Todavía no hay ensayos con lista este mes.</p>` : `
+    <p class="sub" style="margin-bottom:8px;text-align:center">Resumen · ${r.ensayos} ${r.ensayos === 1 ? 'ensayo' : 'ensayos'} con lista<br>De menor a mayor asistencia</p>
+    <p class="total-penalidades">Penalidades del mes: <b>S/ ${r.penalidadTotal}</b></p>
+    <ul class="resumen-lista">${filas.map(p => `
+      <li>
+        <div class="r-fila"><strong>${esc(p.nombre)}</strong>
+          <span class="r-pct">${p.porcentaje === null ? '—' : p.porcentaje + '%'}</span></div>
+        <div class="r-barra" role="img" aria-label="${p.porcentaje === null ? 'sin datos' : p.porcentaje + '% de asistencia'}">
+          <span style="width:${p.porcentaje || 0}%"></span></div>
+        ${detalle(p) ? `<div class="r-detalle">${detalle(p)}</div>` : ''}
+      </li>`).join('')}
+    </ul>`}
+  </section>`;
 }
 
 /* ============================================================
@@ -358,9 +707,17 @@ function vistaInicio(d) {
 
 function textoWhatsApp(d) {
   const e = d.ensayo;
-  let t = `Recuerda que tienes hasta hoy ${e.cierreDia} para avisar si no vas a asistir al ensayo del ${e.fechaTexto} (${e.horario}).`;
+  const llegada = e.horario.split(' a ')[0].replace(/\u00a0/g, ' ');
+  let t = `Recuerda que tienes hasta hoy ${e.cierreDia} a las 11:59 p. m. para avisar si llegarás tarde o no asistirás ` +
+          `al ensayo del ${e.fechaTexto} (llegada ${llegada}). Después se considera falta o tardanza injustificada.`;
   if (estado.nombrarPendientes && d.admin.sinResponder.length) t += `\nAún no responden: ${d.admin.sinResponder.join(', ')}.`;
-  return t + `\nResponde aquí: ${d.admin.url}`;
+  return t + `\nAvisa aquí: ${d.admin.url}`;
+}
+
+/** Insignia corta para la directiva: solo se muestra si el aviso NO fue a tiempo. */
+function insigniaAvisoCorta(m) {
+  if (m.emergencia) return ` <span class="insignia tarde">Emergencia${m.decision === 'aceptada' ? ' · justificada' : m.decision === 'rechazada' ? ' · no justificada' : ' · por decidir'}</span>`;
+  return m.tarde ? ' <span class="insignia sin-aviso">Fuera de plazo</span>' : '';
 }
 
 function vistaDirectiva(d) {
@@ -386,8 +743,10 @@ function vistaDirectiva(d) {
       ${grupo('Van', 'check', a.voy, true, m => `<li>${esc(m.nombre)}
           ${m.social === 'si' ? '<span class="insignia">Se queda al social</span>' : ''}
           ${m.social === 'quizas' ? '<span class="insignia">Social: quizás</span>' : ''}</li>`)}
-      ${grupo('No van', 'x', a.noVoy, true, m => `<li>${esc(m.nombre)}
-          ${m.tarde ? '<span class="insignia tarde">Aviso tarde</span>' : ''}
+      ${grupo('Llegan tarde', 'reloj2', a.llegaTarde || [], true, m => `<li>${esc(m.nombre)}
+          <span class="insignia">${esc(m.hora)}</span>${insigniaAvisoCorta(m)}
+          ${m.motivo ? `<span class="motivo">${esc(m.motivo)}</span>` : ''}</li>`)}
+      ${grupo('No van', 'x', a.noVoy, true, m => `<li>${esc(m.nombre)}${insigniaAvisoCorta(m)}
           ${m.motivo ? `<span class="motivo">${esc(m.motivo)}</span>` : ''}</li>`)}
       ${grupo('Sin responder', 'reloj', a.sinResponder, false, n => `<li>${esc(n)}</li>`)}
     </section>
