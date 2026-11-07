@@ -876,21 +876,33 @@ function detalleCuenta(k, editable) {
           ${c.venceTexto ? `<small>${esc(c.venceTexto)}</small>` : ''}
           ${editable && c.id ? `<button class="enlace peque" onclick="anular('${esc(c.id)}')">Anular</button>` : ''}</div>
       </li>`).join('') : '<li class="sub">Sin cobros todavía.</li>';
-  const pagos = k.pagos.length ? k.pagos.map(p => `
-      <li class="pago-fila">
-        <div class="cobro-fila"><span>${esc(p.metodo)} · ${esc(cuando(p.fecha))}</span><b>${soles(p.monto)}</b></div>
-        <div class="cobro-estado">${p.historial && p.estado === 'confirmado'
-            ? `<span class="chip-estado p-historial">Antes de ${esc(k.desdeTexto.split(' ')[0])} · no cuenta</span>`
-            : `<span class="chip-estado p-${p.estado}">${ESTADO_PAGO[p.estado]}</span>`}
-          ${p.revisadoPor && p.estado !== 'pendiente' ? `<small>por ${esc(p.revisadoPor)}</small>` : ''}
-          ${p.nota ? `<small>${esc(p.nota)}</small>` : ''}</div>
-        ${p.motivoRechazo ? `<p class="motivo-rechazo">Motivo: ${esc(p.motivoRechazo)}</p>` : ''}
-      </li>`).join('') : '<li class="sub">Sin pagos todavía.</li>';
+  // Lo de antes del período (historial) ya no se muestra; los de la carga inicial se leen como "Cuota de agosto · Pagado"
+  const visibles = k.pagos.filter(p => !p.historial && p.estado !== 'anulado');
+  const pagos = visibles.length ? visibles.map(p => {
+    const anterior = p.metodo === 'Registro anterior';
+    const titulo = anterior ? esc((p.nota || 'Pago anterior').replace(/\s*\(carga inicial\)\s*/i, '')) : `${esc(p.metodo)} · ${esc(cuando(p.fecha))}`;
+    const chip = anterior ? '<span class="chip-estado p-confirmado">Pagado</span><small>registrado antes de la app</small>'
+      : `<span class="chip-estado p-${p.estado}">${ESTADO_PAGO[p.estado]}</span>
+         ${p.revisadoPor && p.estado === 'confirmado' ? `<small>por ${esc(p.revisadoPor)}</small>` : ''}
+         ${p.nota ? `<small>${esc(p.nota)}</small>` : ''}`;
+    return `<li class="pago-fila">
+        <div class="cobro-fila"><span>${titulo}</span><b>${soles(p.monto)}</b></div>
+        <div class="cobro-estado">${chip}</div>
+        ${p.motivoRechazo ? `<p class="motivo-rechazo">Rechazado: ${esc(p.motivoRechazo)}</p>` : ''}
+      </li>`;
+  }).join('') : '<li class="sub">Sin pagos todavía.</li>';
+  const falta = Math.max(0, k.saldo);
   return `<div class="detalle-cuenta">
+    <div class="resumen-cuenta">
+      ${k.desdeTexto ? `<p class="resumen-titulo">Desde ${esc(k.desdeTexto)}</p>` : ''}
+      <div class="cifras">
+        <div><b>${soles(k.totalCobrado)}</b><small>Total</small></div>
+        <div><b>${soles(k.totalPagado)}</b><small>Pagado</small></div>
+        <div class="${falta ? 'falta' : 'ok'}"><b>${soles(falta)}</b><small>${k.saldo < 0 ? 'Adelantado ' + soles(-k.saldo) : 'Falta'}</small></div>
+      </div>
+    </div>
     <h3>Cobros</h3><ul class="cobros">${cobros}</ul>
     <h3>Pagos</h3><ul class="cobros">${pagos}</ul>
-    <p class="sub">Se cobra desde ${esc(k.desdeTexto)}. Cada pago cuenta para su mes; los que no indican mes van a lo más antiguo.
-      Total cobrado ${soles(k.totalCobrado)} · pagado ${soles(k.totalPagado)}.</p>
   </div>`;
 }
 
@@ -972,8 +984,9 @@ async function enviarPago() {
   estado.ocupado = true; pintar();
   try {
     estado.cuenta = await api('reportarPago', estado.token, { monto, metodo: f.metodo, nota: f.nota, imagen: f.metodo === 'Efectivo' ? null : f.imagen });
-    estado.datos.miSaldo = { saldo: estado.cuenta.saldo, vencido: estado.cuenta.vencido,
-                             porRevisar: estado.cuenta.porRevisar, montoPorRevisar: estado.cuenta.montoPorRevisar };
+    const k = estado.cuenta;   // la tarjeta de arriba usa los mismos datos que el detalle
+    estado.datos.miSaldo = { saldo: k.saldo, vencido: k.vencido, porRevisar: k.porRevisar, montoPorRevisar: k.montoPorRevisar,
+                             falta: k.falta, porVencer: k.porVencer, porVencerTexto: k.porVencerTexto, desdeTexto: k.desdeTexto };
     estado.pago = null; estado.verCuenta = true;
     aviso('Listo. Tesorería revisará tu pago.');
   } catch (e) { aviso(mensajeError(e)); }

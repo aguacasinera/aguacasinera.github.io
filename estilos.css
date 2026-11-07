@@ -315,6 +315,11 @@
   .e-pagado, .p-confirmado { background: #e3f4e8; color: #1d6b3a; }
   .e-parcial, .e-pendiente, .p-pendiente { background: var(--sol-suave); color: #7a5208; }
   .e-vencido, .p-rechazado { background: var(--primario-suave); color: var(--primario-oscuro); }
+  .resumen-cuenta { margin: 12px 0 4px; }
+  .resumen-titulo { font-size: .82rem; font-weight: 700; color: var(--tinta-2); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .resumen-cuenta .cifras b { font-size: 1.15rem; }
+  .resumen-cuenta .cifras .falta b { color: var(--primario-oscuro); }
+  .resumen-cuenta .cifras .ok b { color: #1d6b3a; }
   .p-historial { background: var(--carbon-suave); color: var(--tinta-2); }
   .desglose { font-size: .86rem; color: var(--tinta-2); margin: 2px 0 6px; }
   .nombre-cuenta { display: flex; flex-direction: column; }
