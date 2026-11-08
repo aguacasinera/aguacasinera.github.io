@@ -59,7 +59,12 @@ const estado = {
   dirBusca: '',
   dirNivel: '',       // filtro por nivel ('' = todos)
   dirAbierto: null,   // id de la persona abierta en Grupo
-  fotos: (() => { try { return JSON.parse(localStorage.getItem('ac_fotos') || '{}'); } catch (e) { return {}; } })()
+  fotos: (() => { try { return JSON.parse(localStorage.getItem('ac_fotos') || '{}'); } catch (e) { return {}; } })(),
+  // v1.21 · Licencias y avisos
+  licForm: { desde: '', regreso: '', motivo: '' },
+  respLicencia: {},   // id de licencia → texto de respuesta que escribe la directiva
+  avisos: null,       // lo que devuelve misAvisos()
+  vistaAnterior: 'inicio'
 };
 
 const primerNombre = n => String(n || '').split(' ')[0];
@@ -75,6 +80,7 @@ const ICONOS = {
   usuario: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
   llave: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
   arroba: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
+  maleta: '<rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   reloj: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   musica: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
@@ -346,13 +352,15 @@ function pintar() {
   if (permisos.lista) pestanas.push(['lista', 'Lista']);
   if (permisos.tesoreria) pestanas.push(['tesoreria', 'Tesorería']);
   if (permisos.directiva && d.admin) pestanas.push(['directiva', 'Directiva']);
-  if (!pestanas.some(p => p[0] === estado.vista) && estado.vista !== 'perfil') estado.vista = 'inicio';
+  if (!pestanas.some(p => p[0] === estado.vista) && !['perfil', 'avisos'].includes(estado.vista)) estado.vista = 'inicio';
   const rolTexto = d.yo.rol === 'admin' ? 'Directiva'
     : [permisos.lista ? 'Talleres' : '', permisos.tesoreria ? 'Tesorería' : ''].filter(Boolean).join(' · ') || 'Miembro';
 
   document.getElementById('app').innerHTML = `
     <header class="barra">
       <div class="marca"><span class="logo"><img src="iconos/logo-blanco.png" alt=""></span>${esc(d.grupo)}</div>
+      <button class="campana-btn" aria-label="Avisos${d.avisosNuevos ? ': ' + d.avisosNuevos + ' nuevos' : ''}" onclick="abrirAvisos()">
+        ${icono('campana')}${d.avisosNuevos ? `<span class="burbuja">${d.avisosNuevos > 9 ? '9+' : d.avisosNuevos}</span>` : ''}</button>
       <button class="avatar" aria-label="Menú" aria-expanded="${String(estado.menu)}"
               onclick="estado.menu=!estado.menu;pintar()">${avatar({ id: d.yo.id, nombre: d.yo.nombre, fotoV: d.yo.fotoV })}</button>
       ${estado.menu ? `<div class="menu">
@@ -368,7 +376,7 @@ function pintar() {
             onclick="irA('${id}')">${texto}</button>`).join('')}
       </nav>` : ''}
     ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'tesoreria' ? vistaTesoreria() : estado.vista === 'directiva' ? vistaDirectiva(d)
-      : estado.vista === 'grupo' ? vistaGrupo() : estado.vista === 'perfil' ? vistaPerfil() : vistaInicio(d)}`;
+      : estado.vista === 'grupo' ? vistaGrupo() : estado.vista === 'perfil' ? vistaPerfil() : estado.vista === 'avisos' ? vistaAvisos() : vistaInicio(d)}`;
 
   if (estado.editando === 'llego_tarde' && !estado.hora) document.getElementById('hora')?.focus();
   const enfocar = estado.enfocar ? { id: estado.enfocar } : campo;
@@ -557,11 +565,14 @@ function tarjetaResumen(s) {
       <div><b>${s.llegaTarde}</b><small>Llegan tarde</small></div>
       <div><b>${s.noVoy}</b><small>No van</small></div>
       <div><b>${s.sinResponder}</b><small>Sin responder</small></div>
-    </div></section>`;
+    </div>
+    ${s.deLicencia ? `<p class="sub" style="margin-top:8px">${icono('maleta')} ${s.deLicencia === 1 ? '1 persona está' : s.deLicencia + ' personas están'} de licencia.</p>` : ''}
+    </section>`;
 }
 
 function vistaInicio(d) {
-  return tarjetaCumpleHoy(d) + tarjetaEnsayo(d.ensayo) + bloquePlazo(d.ensayo) + tarjetaRespuesta(d) +
+  const conLicencia = d.miLicencia && d.miLicencia.cubreEnsayo;   // de licencia ese día: el plazo para avisar no aplica
+  return tarjetaCumpleHoy(d) + tarjetaEnsayo(d.ensayo) + tarjetaMiLicencia(d) + (conLicencia ? '' : bloquePlazo(d.ensayo)) + tarjetaRespuesta(d) +
     (d.ensayo.estado === 'cancelado' ? '' : tarjetaResumen(d.resumen)) + tarjetaMiCuenta(d) + tarjetaMiAsistencia(d.miAsistencia);
 }
 
@@ -708,7 +719,8 @@ function vistaLista() {
     if (p.respuesta === 'voy') t = `<span class="nota voy">${icono('check')} Dijo que va</span>`;
     else if (p.respuesta === 'llego_tarde') t = `<span class="nota llegotarde">${icono('reloj2')} Avisó que llega a las ${esc(p.horaAvisada)}${fuera(p)}</span>`;
     else if (p.respuesta === 'no_voy') t = `<span class="nota novoy">${icono('x')} Avisó que no va${fuera(p)}</span>`;
-    else t = `<span class="nota">No respondió</span>`;
+    else t = p.licencia ? '' : `<span class="nota">No respondió</span>`;
+    if (p.licencia) t = `<span class="nota licencia">${icono('maleta')} De licencia ${esc(p.licencia)}</span>` + t;
     if (p.horaEsperada !== l.horaGeneral) t += `<span class="nota esperada">Se le espera a las ${esc(p.horaEsperada)}</span>`;
     if (p.motivo && !p.emergencia) t += `<span class="nota motivo">${esc(p.motivo)}</span>`;
     return t;
@@ -854,6 +866,7 @@ function vistaDirectiva(d) {
 
   return `
     ${pin}
+    ${tarjetaLicenciasAdmin(a)}
     <section class="tarjeta">
       <h2>Respuestas · ${esc(e.fechaTexto)}</h2>
       ${grupo('Van', 'check', a.voy, true, m => `<li>${esc(m.nombre)}
@@ -865,6 +878,7 @@ function vistaDirectiva(d) {
       ${grupo('No van', 'x', a.noVoy, true, m => `<li>${esc(m.nombre)}${insigniaAvisoCorta(m)}
           ${m.motivo ? `<span class="motivo">${esc(m.motivo)}</span>` : ''}</li>`)}
       ${grupo('Sin responder', 'reloj', a.sinResponder, false, n => `<li>${esc(n)}</li>`)}
+      ${(a.deLicencia || []).length ? grupo('De licencia', 'maleta', a.deLicencia, false, m => `<li>${esc(m.nombre)} <span class="insignia">vuelve el ${esc(m.regreso)}</span></li>`) : ''}
     </section>
 
     <section class="tarjeta">
@@ -1790,7 +1804,7 @@ async function abrirPerfil() {
 }
 function formDesdePerfil() {
   const p = estado.perfil;
-  estado.perfilForm = { apodo: p.apodo, mes: p.cumple ? p.cumple.slice(0, 2) : '', dia: p.cumple ? String(Number(p.cumple.slice(3))) : '',
+  estado.perfilForm = { correo: p.correo || "", apodo: p.apodo, mes: p.cumple ? p.cumple.slice(0, 2) : '', dia: p.cumple ? String(Number(p.cumple.slice(3))) : '',
                         celular: p.celular, instagram: p.instagram, pinActual: '', pinNuevo: '', pinRepite: '' };
 }
 
@@ -1832,10 +1846,14 @@ function vistaPerfil() {
       </div>
       <label class="campo" for="pf-cel">Celular (WhatsApp)</label>
       <input type="tel" id="pf-cel" inputmode="tel" placeholder="987 654 321" value="${esc(f.celular)}" oninput="estado.perfilForm.celular=this.value">
+      <label class="campo" for="pf-correo">Correo <span class="ayuda">· para recordatorios; solo lo ve la directiva</span></label>
+      <input type="email" id="pf-correo" autocapitalize="none" placeholder="tu@correo.com" value="${esc(f.correo)}" oninput="estado.perfilForm.correo=this.value">
       <label class="campo" for="pf-ig">Instagram</label>
       <div class="con-prefijo"><span>@</span><input type="text" id="pf-ig" autocapitalize="none" placeholder="tu.usuario" value="${esc(f.instagram)}" oninput="estado.perfilForm.instagram=this.value"></div>
       <div class="acciones"><button class="boton" ${ocupado} onclick="guardarMiPerfil()">Guardar cambios</button></div>
     </section>
+
+    ${tarjetaLicenciaPerfil(p)}
 
     <section class="tarjeta">
       <h2>${icono('llave')} Cambiar mi PIN</h2>
@@ -1897,7 +1915,7 @@ async function guardarMiPerfil() {
   if (!!f.dia !== !!f.mes) return aviso('Elige el día y el mes de tu cumpleaños (o deja los dos vacíos).');
   const cumple = f.mes && f.dia ? `${f.mes}-${String(f.dia).padStart(2, '0')}` : '';
   const pinActual = f.pinActual, pinNuevo = f.pinNuevo, pinRepite = f.pinRepite;
-  if (await accionPerfil('guardarPerfil', { apodo: f.apodo, cumple, celular: f.celular, instagram: f.instagram })) {
+  if (await accionPerfil('guardarPerfil', { apodo: f.apodo, cumple, celular: f.celular, instagram: f.instagram, correo: f.correo })) {
     formDesdePerfil(); Object.assign(estado.perfilForm, { pinActual, pinNuevo, pinRepite }); pintar();
     aviso('Perfil guardado.');
   }
@@ -1917,6 +1935,158 @@ async function cambiarMiPin() {
   } catch (e) { aviso(mensajeError(e)); }
   estado.ocupado = false; pintar();
 }
+
+/* ============================================================
+ *  v1.21 · LICENCIAS
+ * ============================================================ */
+
+const ESTADO_LICENCIA = { pendiente: 'Esperando respuesta', aprobada: 'Aprobada', denegada: 'Denegada', cancelada: 'Cancelada' };
+/** "lun 10 nov" desde "2026-11-10" */
+const diaCorto = iso => { const d = new Date(iso + 'T12:00:00-05:00'); return ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][d.getUTCDay()] + ' ' + fechaCorta(iso); };
+function sumarDiasLocal(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+const ultimoDia = l => sumarDiasLocal(l.regreso, -1);
+
+/** Inicio: si estoy de licencia (hoy o el día del próximo ensayo). */
+function tarjetaMiLicencia(d) {
+  const l = d.miLicencia;
+  if (!l) return '';
+  return `<section class="tarjeta licencia-activa">
+      <p><b>${icono('maleta')} Estás de licencia</b> hasta el ${esc(diaCorto(ultimoDia(l)))}. Vuelves el <b>${esc(diaCorto(l.regreso))}</b>.</p>
+      <p class="sub">No tienes que avisar a los ensayos de esos días. Si igual vas, puedes marcar "Voy".</p>
+    </section>`;
+}
+
+/** Mi perfil → Licencia */
+function tarjetaLicenciaPerfil(p) {
+  const lista = p.licencias || [], f = estado.licForm, ocupado = estado.ocupado ? 'disabled' : '';
+  const abierta = lista.find(l => l.estado === 'pendiente' || (l.estado === 'aprobada' && !l.terminada));
+  const historial = lista.filter(l => l !== abierta).slice(0, 3);
+  const hoy = hoyLima();
+  const fila = (l, principal) => `<div class="lic ${principal ? 'principal' : ''} lic-${l.estado}">
+      <div class="cobro-fila"><span>${esc(diaCorto(l.desde))} → vuelve el ${esc(diaCorto(l.regreso))}</span>
+        <span class="chip-estado lic-chip-${l.estado}">${l.activa ? 'En curso' : ESTADO_LICENCIA[l.estado]}</span></div>
+      <p class="sub">${l.dias} ${l.dias === 1 ? 'día' : 'días'}${l.motivo ? ' · ' + esc(l.motivo) : ''}</p>
+      ${l.respuesta ? `<p class="motivo-exo">${esc(primerNombre(l.revisadoPor))}: ${esc(l.respuesta)}</p>` : ''}
+      ${principal ? `<div class="acciones">
+        <button class="boton secundario" ${ocupado} onclick="cancelarMiLicencia('${esc(l.id)}')">${l.activa ? 'Volví antes' : 'Cancelar licencia'}</button></div>` : ''}
+    </div>`;
+  return `<section class="tarjeta" id="licencia">
+      <h2>${icono('maleta')} Licencia</h2>
+      <p class="sub">Si vas a ausentarte un tiempo, pide licencia. Mientras dure no tienes que avisar a los ensayos y las faltas no tienen penalidad. La cuota mensual sigue.</p>
+      ${abierta ? fila(abierta, true) : `
+        <div class="dos-col" style="margin-top:10px">
+          <div><label class="campo" for="lic-desde">Desde</label>
+            <input type="date" id="lic-desde" min="${esc(sumarDiasLocal(hoy, -7))}" value="${esc(f.desde)}" onchange="estado.licForm.desde=this.value"></div>
+          <div><label class="campo" for="lic-regreso">Vuelvo el</label>
+            <input type="date" id="lic-regreso" min="${esc(f.desde || hoy)}" value="${esc(f.regreso)}" onchange="estado.licForm.regreso=this.value"></div>
+        </div>
+        <label class="campo" for="lic-motivo">Motivo <span class="ayuda">· opcional; lo ve la directiva</span></label>
+        <input type="text" id="lic-motivo" maxlength="200" placeholder="Ej.: viaje, exámenes, trabajo" value="${esc(f.motivo)}" oninput="estado.licForm.motivo=this.value">
+        <div class="acciones"><button class="boton" ${ocupado} onclick="pedirLicencia()">Pedir licencia</button></div>`}
+      ${historial.length ? `<h3>Anteriores</h3>${historial.map(l => fila(l, false)).join('')}` : ''}
+    </section>`;
+}
+
+async function pedirLicencia() {
+  const f = estado.licForm;
+  if (!f.desde || !f.regreso) return aviso('Elige desde cuándo y el día que vuelves.');
+  if (f.regreso <= f.desde) return aviso('El día que vuelves tiene que ser después del inicio.');
+  if (await accionPerfil('solicitarLicencia', { desde: f.desde, regreso: f.regreso, motivo: f.motivo })) {
+    estado.licForm = { desde: '', regreso: '', motivo: '' }; pintar();
+    aviso('Listo: la directiva revisará tu licencia.');
+  }
+}
+async function cancelarMiLicencia(id) {
+  const l = estado.perfil.licencias.find(x => x.id === id);
+  if (!confirm(l && l.activa ? '¿Terminar tu licencia hoy? Desde hoy vuelves a avisar a los ensayos.' : '¿Cancelar esta licencia?')) return;
+  if (await accionPerfil('cancelarLicencia', id)) { refrescarInicio(); aviso(l && l.activa ? '¡Bienvenido de vuelta!' : 'Licencia cancelada.'); }
+}
+
+/** Directiva: licencias por revisar y vigentes. */
+function tarjetaLicenciasAdmin(a) {
+  const k = a.licencias || { pendientes: [], vigentes: [] };
+  if (!k.pendientes.length && !k.vigentes.length) return '';
+  const ocupado = estado.ocupado ? 'disabled' : '';
+  return `<section class="tarjeta" id="licencias-admin">
+      <h2>${icono('maleta')} Licencias ${k.pendientes.length ? `<span class="insignia tarde">${k.pendientes.length} por revisar</span>` : ''}</h2>
+      ${k.pendientes.map(l => `<div class="lic principal lic-pendiente">
+          <div class="cobro-fila"><b>${esc(l.nombre)}</b><span class="sub">${l.dias} ${l.dias === 1 ? 'día' : 'días'}</span></div>
+          <p>${esc(diaCorto(l.desde))} → vuelve el ${esc(diaCorto(l.regreso))}</p>
+          ${l.motivo ? `<p class="sub">Motivo: ${esc(l.motivo)}</p>` : ''}
+          <label class="campo" for="resp-${esc(l.id)}">Respuesta <span class="ayuda">· opcional, le llega a ${esc(primerNombre(l.nombre))}</span></label>
+          <input type="text" id="resp-${esc(l.id)}" maxlength="200" value="${esc(estado.respLicencia[l.id] || '')}" oninput="estado.respLicencia['${esc(l.id)}']=this.value">
+          <div class="acciones">
+            <button class="boton secundario" ${ocupado} onclick="decidirLicencia('${esc(l.id)}','denegada')">${icono('x')} Denegar</button>
+            <button class="boton" ${ocupado} onclick="decidirLicencia('${esc(l.id)}','aprobada')">${icono('check')} Aprobar</button>
+          </div>
+        </div>`).join('')}
+      ${k.vigentes.length ? `<h3>Aprobadas</h3><ul class="cobros">${k.vigentes.map(l => `<li><div class="cobro-fila"><span>${esc(l.nombre)}</span>
+          <small class="sub">${esc(diaCorto(l.desde))} → ${esc(diaCorto(l.regreso))}</small></div></li>`).join('')}</ul>` : ''}
+    </section>`;
+}
+async function decidirLicencia(id, decision) {
+  if (decision === 'denegada' && !confirm('¿Denegar esta licencia?')) return;
+  await accion('adminDecidirLicencia', id, decision, estado.respLicencia[id] || '');
+  delete estado.respLicencia[id];
+  aviso(decision === 'aprobada' ? 'Licencia aprobada. Ya le llegó el aviso.' : 'Licencia denegada. Ya le llegó el aviso.');
+}
+
+/* ============================================================
+ *  v1.21 · AVISOS (la campana)
+ * ============================================================ */
+
+async function abrirAvisos() {
+  if (estado.vista !== 'avisos') estado.vistaAnterior = estado.vista;
+  estado.menu = false; estado.vista = 'avisos';
+  pintar(); window.scrollTo(0, 0);
+  try {
+    estado.avisos = await api('misAvisos', estado.token);
+    estado.datos.avisosNuevos = 0; guardarCopia(estado.datos);
+  } catch (e) { if (mensajeError(e).includes('SESION')) return cerrarSesion(); aviso(mensajeError(e)); }
+  pintar();
+}
+/** "hace 5 min", "ayer", "lun 10 nov" */
+function haceCuanto(iso) {
+  const min = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (min < 1) return 'ahora';
+  if (min < 60) return `hace ${min} min`;
+  if (min < 24 * 60) return `hace ${Math.round(min / 60)} h`;
+  if (min < 48 * 60) return 'ayer';
+  return cuando(iso);
+}
+const DESTINO = { inicio: 'Inicio', grupo: 'Grupo', perfil: 'Mi perfil', tesoreria: 'Tesorería', directiva: 'Directiva', lista: 'Lista' };
+function irDesdeAviso(destino) {
+  if (destino === 'perfil') return abrirPerfil();
+  irA(destino);
+  if (destino === 'directiva') setTimeout(() => document.getElementById('licencias-admin')?.scrollIntoView({ behavior: 'smooth' }), 50);
+}
+function vistaAvisos() {
+  const lista = estado.avisos;
+  return `
+    <button class="enlace volver" onclick="irA(estado.vistaAnterior || 'inicio')">← Volver</button>
+    <section class="tarjeta">
+      <h2>${icono('campana')} Avisos</h2>
+      ${!lista ? '<div class="cargando"><span class="ola"></span>Cargando…</div>'
+        : !lista.length ? '<p class="sub">No tienes avisos todavía. Aquí aparecerán las respuestas a tus licencias, tus pagos y los recordatorios.</p>'
+        : `<ul class="avisos">${lista.map(a => `<li class="${a.nuevo ? 'nuevo' : ''}">
+            <button onclick="irDesdeAviso('${esc(a.ir)}')">
+              <span class="aviso-cab"><b>${esc(a.titulo)}</b><small>${esc(haceCuanto(a.fecha))}</small></span>
+              <span class="aviso-texto">${esc(a.texto)}</span>
+              ${DESTINO[a.ir] ? `<small class="aviso-ir">Ver en ${DESTINO[a.ir]} →</small>` : ''}
+            </button></li>`).join('')}</ul>`}
+    </section>`;
+}
+
+/** Al volver a la app (estaba en segundo plano), trae lo nuevo si pasó más de un minuto. */
+let ultimoRefresco = Date.now();
+async function refrescarInicio() {
+  ultimoRefresco = Date.now();
+  try { estado.datos = await api('inicio', estado.token); guardarCopia(estado.datos); pintar(); }
+  catch (e) { if (mensajeError(e).includes('SESION')) cerrarSesion(); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && estado.token && estado.datos && Date.now() - ultimoRefresco > 60000) refrescarInicio();
+});
 
 /* ============================================================
  *  INSTALAR LA APP
