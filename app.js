@@ -92,21 +92,69 @@ function esc(s) {
  * consulta previa de CORS (preflight), que Apps Script no responde.
  */
 async function api(accion, ...args) {
-  let resp;
+  return enviar({ accion, args });
+}
+
+/**
+ * Varias acciones en UN solo viaje al servidor: apiLote([['inicio', token], ['miCuenta', token]]).
+ * Devuelve [{ok, datos|error}, …]. Cada viaje a Google tarda ~1 s: juntar pedidos es lo que más acelera.
+ */
+async function apiLote(pedidos) {
+  return enviar({ lote: pedidos.map(([accion, ...args]) => ({ accion, args })) });
+}
+
+let enCurso = 0;   // pedidos en camino: mientras haya alguno, se ve la barrita de carga arriba
+async function enviar(cuerpo) {
+  enCurso++; document.body.classList.add('red-ocupada');
   try {
-    resp = await fetch(CONFIG.API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ accion, args })
-    });
-  } catch (e) {
-    throw new Error('Sin conexión. Revisa tu internet e inténtalo de nuevo.');
+    let resp;
+    try {
+      resp = await fetch(CONFIG.API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(cuerpo)
+      });
+    } catch (e) {
+      throw new Error('Sin conexión. Revisa tu internet e inténtalo de nuevo.');
+    }
+    let r;
+    try { r = await resp.json(); }
+    catch (e) { throw new Error('El servidor no respondió bien. Inténtalo en un momento.'); }
+    if (!r.ok) throw new Error(r.error);
+    return r.datos;
+  } finally {
+    if (--enCurso === 0) document.body.classList.remove('red-ocupada');
   }
-  let r;
-  try { r = await resp.json(); }
-  catch (e) { throw new Error('El servidor no respondió bien. Inténtalo en un momento.'); }
-  if (!r.ok) throw new Error(r.error);
-  return r.datos;
+}
+
+/* ---------- Copia local de la última pantalla: la app abre al instante y se actualiza por detrás ---------- */
+function guardarCopia(datos) {
+  try { localStorage.setItem('ac_copia', JSON.stringify({ token: estado.token, datos })); } catch (e) {}
+}
+function leerCopia() {
+  try {
+    const c = JSON.parse(localStorage.getItem('ac_copia') || 'null');
+    return c && c.token === estado.token ? c.datos : null;
+  } catch (e) { return null; }
+}
+
+/** Trae en un solo viaje lo de las otras pestañas, para que al tocarlas ya esté listo. */
+async function precargar() {
+  const p = (estado.datos && estado.datos.permisos) || {};
+  const pedidos = [['miCuenta', estado.token]];
+  if (p.lista) pedidos.push(['listaAsistencia', estado.token, ''], ['resumenAsistencia', estado.token, '']);
+  if (p.tesoreria) pedidos.push(['tesoreriaResumen', estado.token]);
+  try {
+    const r = await apiLote(pedidos);
+    let i = 0;
+    if (r[i].ok) estado.cuenta = r[i].datos; i++;
+    if (p.lista) {
+      if (r[i].ok && !estado.lista) estado.lista = r[i].datos; i++;
+      if (r[i].ok && !estado.resumen) estado.resumen = r[i].datos; i++;
+    }
+    if (p.tesoreria && r[i].ok) estado.teso = r[i].datos;
+    if (estado.vista !== 'inicio' || estado.verCuenta) pintar();
+  } catch (e) { /* si falla, cada pestaña lo pedirá cuando se abra */ }
 }
 
 function mensajeError(e) {
@@ -145,11 +193,16 @@ function tiempoRestante(iso) {
 
 async function arrancar() {
   if (!estado.token) return mostrarAcceso();
+  const copia = leerCopia();
+  if (copia) { estado.datos = copia; pintar(); }        // al instante, con lo último que se vio
   try {
     estado.datos = await api('inicio', estado.token);
+    guardarCopia(estado.datos);
     pintar();
+    precargar();
   } catch (e) {
     if (mensajeError(e).includes('SESION')) return cerrarSesion();
+    if (copia) return aviso('Sin conexión: estás viendo la última información guardada.');
     document.getElementById('app').innerHTML =
       `<header class="barra"><div class="marca"><span class="logo"><img src="iconos/logo-blanco.png" alt=""></span>Agua Casinera</div></header>
        <div class="aviso-error" role="alert">No se pudo cargar: ${esc(mensajeError(e))}</div>
@@ -164,6 +217,7 @@ async function mostrarAcceso() {
 }
 
 function cerrarSesion() {
+  try { localStorage.removeItem('ac_copia'); } catch (e) {}
   guardarToken(null);
   estado.token = null; estado.menu = false; estado.vista = 'inicio';
   estado.lista = null; estado.resumen = null; estado.cambios = {};
@@ -180,9 +234,9 @@ async function accion(funcion, ...args) {
     if (r && r.pin) {             // crear miembro o reiniciar PIN
       estado.pinNuevo = { nombre: r.nombre, pin: r.pin };
       if (!r.datos) { estado.ocupado = false; aviso('Tu PIN cambió. Vuelve a entrar con el nuevo.'); return; }
-      estado.datos = r.datos;
+      estado.datos = r.datos; guardarCopia(r.datos);
     } else {
-      estado.datos = r;
+      estado.datos = r; guardarCopia(r);
     }
     estado.editando = null;
     if (r && r.pin) estado.nuevoNombre = estado.nuevoCorreo = '';
@@ -236,6 +290,7 @@ function pintarAcceso() {
       const datos = await api('entrar', id, pin);
       estado.token = datos.token; guardarToken(datos.token);
       estado.datos = datos; estado.errorAcceso = '';
+      guardarCopia(datos); precargar();
       pintar();
     } catch (e) {
       estado.errorAcceso = mensajeError(e);
@@ -1021,8 +1076,13 @@ async function accionTeso(funcion, ...args) {
   if (estado.ocupado) return;
   estado.ocupado = true; pintar();
   try {
-    estado.teso = await api(funcion, estado.token, ...args);
-    if (estado.tesoCuenta) estado.tesoCuenta.datos = await api('tesoreriaCuenta', estado.token, estado.tesoCuenta.id);
+    // La acción y el detalle de la persona abierta, en un solo viaje
+    const pedidos = [[funcion, estado.token, ...args]];
+    if (estado.tesoCuenta) pedidos.push(['tesoreriaCuenta', estado.token, estado.tesoCuenta.id]);
+    const r = await apiLote(pedidos);
+    if (!r[0].ok) throw new Error(r[0].error);
+    estado.teso = r[0].datos;
+    if (r[1] && r[1].ok) estado.tesoCuenta.datos = r[1].datos;
     estado.rechazando = null;
     estado.ocupado = false; pintar();
     return true;

@@ -355,4 +355,11 @@
   .cobro-personas-cab { display: flex; justify-content: space-between; align-items: center; margin: 12px 0 6px; }
   .cobro-personas-cab .campo { margin: 0; }
 
+  /* ============ v1.14 · Barrita de carga (hay un pedido en camino) ============ */
+  body.red-ocupada::before { content: ''; position: fixed; top: env(safe-area-inset-top); left: 0; right: 0; height: 3px; z-index: 50;
+    background: linear-gradient(90deg, transparent, var(--primario), transparent); background-size: 50% 100%;
+    background-repeat: no-repeat; animation: deslizar 1s linear infinite; }
+  @keyframes deslizar { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+  .boton[disabled], .opcion[disabled], .chip[disabled], .mini[disabled] { cursor: progress; }
+
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
