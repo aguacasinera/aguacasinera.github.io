@@ -50,7 +50,16 @@ const estado = {
   gasto: { concepto: '', monto: '', fecha: '', nota: '' },
   editandoSaldo: false,
   verTodosGastos: false,
-  verCuadro: false
+  verCuadro: false,
+  exonerando: null,   // v1.19 · clave del cobro que se está exonerando (formulario abierto)
+  // v1.20 · Perfiles
+  perfil: null,       // lo que devuelve miPerfil()
+  perfilForm: null,   // { apodo, dia, mes, celular, instagram } mientras se edita
+  dir: null,          // lo que devuelve directorio()
+  dirBusca: '',
+  dirNivel: '',       // filtro por nivel ('' = todos)
+  dirAbierto: null,   // id de la persona abierta en Grupo
+  fotos: (() => { try { return JSON.parse(localStorage.getItem('ac_fotos') || '{}'); } catch (e) { return {}; } })()
 };
 
 const primerNombre = n => String(n || '').split(' ')[0];
@@ -60,6 +69,12 @@ const ICONOS = {
   olas: '<path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   chat: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  camara: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  pastel: '<path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/><path d="M7 4h.01"/><path d="M12 4h.01"/><path d="M17 4h.01"/>',
+  buscar: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  usuario: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  llave: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  arroba: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   reloj: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   musica: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
@@ -154,8 +169,11 @@ async function precargar() {
   const pedidos = [['miCuenta', estado.token]];
   if (p.lista) pedidos.push(['listaAsistencia', estado.token, ''], ['resumenAsistencia', estado.token, '']);
   if (p.tesoreria) pedidos.push(['tesoreriaResumen', estado.token]);
+  pedidos.push(['directorio', estado.token]);          // v1.20: fotos y datos del grupo
   try {
     const r = await apiLote(pedidos);
+    const dir = r[r.length - 1];
+    if (dir && dir.ok) recibirDirectorio(dir.datos);
     let i = 0;
     if (r[i].ok) estado.cuenta = r[i].datos; i++;
     if (p.lista) {
@@ -163,7 +181,7 @@ async function precargar() {
       if (r[i].ok && !estado.resumen) estado.resumen = r[i].datos; i++;
     }
     if (p.tesoreria && r[i].ok) estado.teso = r[i].datos;
-    if (estado.vista !== 'inicio' || estado.verCuenta) pintar();
+    pintar();                                            // ya están las fotos (avatar de arriba, Grupo)
   } catch (e) { /* si falla, cada pestaña lo pedirá cuando se abra */ }
 }
 
@@ -228,6 +246,7 @@ async function mostrarAcceso() {
 
 function cerrarSesion() {
   try { localStorage.removeItem('ac_copia'); } catch (e) {}
+  estado.perfil = null; estado.perfilForm = null; estado.dir = null; estado.dirAbierto = null;
   guardarToken(null);
   estado.token = null; estado.menu = false; estado.vista = 'inicio';
   estado.lista = null; estado.resumen = null; estado.cambios = {};
@@ -317,12 +336,17 @@ function pintarAcceso() {
 function pintar() {
   const d = estado.datos;
   if (!d) return;
+  // Si se está escribiendo en un campo y la pantalla se vuelve a pintar (por ejemplo, llegó algo del servidor),
+  // el cursor vuelve al mismo campo y en la misma posición.
+  const activo = document.activeElement;
+  const campo = activo && activo.id && /^(INPUT|TEXTAREA|SELECT)$/.test(activo.tagName)
+    ? { id: activo.id, ini: activo.selectionStart, fin: activo.selectionEnd } : null;
   const permisos = d.permisos || { lista: false, directiva: !!d.admin };
-  const pestanas = [['inicio', 'Inicio']];
+  const pestanas = [['inicio', 'Inicio'], ['grupo', 'Grupo']];
   if (permisos.lista) pestanas.push(['lista', 'Lista']);
   if (permisos.tesoreria) pestanas.push(['tesoreria', 'Tesorería']);
   if (permisos.directiva && d.admin) pestanas.push(['directiva', 'Directiva']);
-  if (!pestanas.some(p => p[0] === estado.vista)) estado.vista = 'inicio';
+  if (!pestanas.some(p => p[0] === estado.vista) && estado.vista !== 'perfil') estado.vista = 'inicio';
   const rolTexto = d.yo.rol === 'admin' ? 'Directiva'
     : [permisos.lista ? 'Talleres' : '', permisos.tesoreria ? 'Tesorería' : ''].filter(Boolean).join(' · ') || 'Miembro';
 
@@ -330,9 +354,10 @@ function pintar() {
     <header class="barra">
       <div class="marca"><span class="logo"><img src="iconos/logo-blanco.png" alt=""></span>${esc(d.grupo)}</div>
       <button class="avatar" aria-label="Menú" aria-expanded="${String(estado.menu)}"
-              onclick="estado.menu=!estado.menu;pintar()">${esc(d.yo.nombre.charAt(0).toUpperCase())}</button>
+              onclick="estado.menu=!estado.menu;pintar()">${avatar({ id: d.yo.id, nombre: d.yo.nombre, fotoV: d.yo.fotoV })}</button>
       ${estado.menu ? `<div class="menu">
-          <p><strong>${esc(d.yo.nombre)}</strong>${rolTexto}</p>
+          <p><strong>${esc(d.yo.nombre)}</strong>${rolTexto}${d.yo.nivel ? ` · ${insigniaNivel(d.yo.nivel)}` : ''}</p>
+          <button class="enlace" onclick="abrirPerfil()">${icono('usuario')} Mi perfil</button><br>
           ${estado.instalar ? `<button class="enlace" onclick="instalarApp()">${icono('descargar')} Instalar app</button><br>` : ''}
           <button class="enlace" onclick="cerrarSesion()">${icono('salir')} Cerrar sesión</button>
           <p class="version">Versión ${esc(CONFIG.VERSION)}</p>
@@ -342,9 +367,18 @@ function pintar() {
         ${pestanas.map(([id, texto]) => `<button role="tab" aria-selected="${String(estado.vista === id)}"
             onclick="irA('${id}')">${texto}</button>`).join('')}
       </nav>` : ''}
-    ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'tesoreria' ? vistaTesoreria() : estado.vista === 'directiva' ? vistaDirectiva(d) : vistaInicio(d)}`;
+    ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'tesoreria' ? vistaTesoreria() : estado.vista === 'directiva' ? vistaDirectiva(d)
+      : estado.vista === 'grupo' ? vistaGrupo() : estado.vista === 'perfil' ? vistaPerfil() : vistaInicio(d)}`;
 
   if (estado.editando === 'llego_tarde' && !estado.hora) document.getElementById('hora')?.focus();
+  const enfocar = estado.enfocar ? { id: estado.enfocar } : campo;
+  estado.enfocar = null;
+  const el = enfocar && document.getElementById(enfocar.id);
+  if (el && document.activeElement !== el) {
+    el.focus({ preventScroll: true });
+    const n = el.value ? el.value.length : 0;
+    try { el.setSelectionRange(enfocar.ini ?? n, enfocar.fin ?? n); } catch (e) { /* select, date: no tienen cursor */ }
+  }
 }
 
 function tarjetaEnsayo(e) {
@@ -527,7 +561,7 @@ function tarjetaResumen(s) {
 }
 
 function vistaInicio(d) {
-  return tarjetaEnsayo(d.ensayo) + bloquePlazo(d.ensayo) + tarjetaRespuesta(d) +
+  return tarjetaCumpleHoy(d) + tarjetaEnsayo(d.ensayo) + bloquePlazo(d.ensayo) + tarjetaRespuesta(d) +
     (d.ensayo.estado === 'cancelado' ? '' : tarjetaResumen(d.resumen)) + tarjetaMiCuenta(d) + tarjetaMiAsistencia(d.miAsistencia);
 }
 
@@ -536,6 +570,7 @@ async function irA(vista) {
   if (estado.vista === 'lista' && vista !== 'lista') await guardarCambios();
   estado.vista = vista; estado.menu = false;
   pintar();
+  if (vista === 'grupo') cargarDirectorio();
   if (vista === 'lista' && !estado.lista) { cargarLista(); cargarResumen(); }
   if (vista === 'tesoreria') cargarTesoreria();
 }
@@ -894,7 +929,7 @@ function mensajePin() {
  * ============================================================ */
 
 const soles = n => 'S/ ' + (Math.round(n * 100) / 100).toFixed(Number.isInteger(n) ? 0 : 2);
-const ESTADO_COBRO = { pagado: 'Pagado', parcial: 'Pago parcial', pendiente: 'Pendiente', vencido: 'Vencido' };
+const ESTADO_COBRO = { pagado: 'Pagado', parcial: 'Pago parcial', pendiente: 'Pendiente', vencido: 'Vencido', exonerado: 'Exonerado' };
 const ESTADO_PAGO = { pendiente: 'Por revisar', confirmado: 'Confirmado', rechazado: 'Rechazado', anulado: 'Anulado' };
 /** Hoy en Lima como "2026-11-07" (para el campo de fecha). */
 const hoyLima = () => new Date(Date.now() - 5 * 3600 * 1000).toISOString().slice(0, 10);
@@ -936,13 +971,25 @@ function desgloseFalta(f) {
 
 /** Lista de cobros y pagos. editable = Tesorería puede anular cobros hechos a mano. */
 function detalleCuenta(k, editable) {
+  const admin = editable && estado.teso && estado.teso.esAdmin;
+  const puedeExonerar = c => admin && ['vencido', 'pendiente', 'parcial'].includes(c.estado);
+  const montoCobro = c => c.exonerado > 0
+    ? (c.monto > 0 ? `${soles(c.monto)} <s class="tachado">${soles(c.montoOriginal)}</s>` : `<s class="tachado">${soles(c.montoOriginal)}</s>`)
+    : soles(c.monto);
   const cobros = k.cobros.length ? k.cobros.map(c => `
       <li class="cobro c-${c.estado}">
-        <div class="cobro-fila"><span>${esc(c.concepto)}</span><b>${soles(c.monto)}</b></div>
+        <div class="cobro-fila"><span>${esc(c.concepto)}</span><b>${montoCobro(c)}</b></div>
         <div class="cobro-estado"><span class="chip-estado e-${c.estado}">${ESTADO_COBRO[c.estado]}${c.estado === 'parcial' ? ' · faltan ' + soles(c.monto - c.cubierto) : ''}</span>
           ${c.venceTexto ? `<small>${esc(c.venceTexto)}</small>` : ''}
-          ${editable && c.id ? `<button class="enlace peque" onclick="anular('${esc(c.id)}')">Anular</button>` : ''}</div>
+          ${editable && c.id ? `<button class="enlace peque" onclick="anular('${esc(c.id)}')">Anular</button>` : ''}
+          ${puedeExonerar(c) && estado.exonerando !== c.clave ? `<button class="enlace peque" onclick="estado.exonerando='${esc(c.clave)}';pintar()">Exonerar</button>` : ''}</div>
+        ${c.exonerado > 0 ? `<p class="motivo-exo">${c.monto > 0 ? `Exonerado ${soles(c.exonerado)}` : 'Motivo'}: ${esc(c.motivoExo || '')}</p>` : ''}
+        ${puedeExonerar(c) && estado.exonerando === c.clave ? formularioExonerar(c) : ''}
       </li>`).join('') : '<li class="sub">Sin cobros todavía.</li>';
+  const exos = admin && k.exoneraciones && k.exoneraciones.length ? `<h3>Exoneraciones</h3><ul class="cobros">${k.exoneraciones.map(x => `
+      <li><div class="cobro-fila"><span>${esc(x.concepto)}</span><b>${soles(x.monto)}</b></div>
+        <p class="sub">${esc(x.motivo)} · por ${esc(primerNombre(x.autorizadoPor))} · ${esc(cuando(x.fecha))}
+          · <button class="enlace peque" ${estado.ocupado ? 'disabled' : ''} onclick="deshacerExoneracion('${esc(x.id)}')">Deshacer</button></p></li>`).join('')}</ul>` : '';
   // Lo de antes del período (historial) ya no se muestra; los de la carga inicial se leen como "Cuota de agosto · Pagado"
   const visibles = k.pagos.filter(p => !p.historial && p.estado !== 'anulado');
   const pagos = visibles.length ? visibles.map(p => {
@@ -970,8 +1017,41 @@ function detalleCuenta(k, editable) {
     </div>
     ${editable ? '' : avisosDePagos(k)}
     <h3>Cobros</h3><ul class="cobros">${cobros}</ul>
+    ${exos}
     ${editable ? `<h3>Pagos</h3><ul class="cobros">${pagos}</ul>` : ''}
   </div>`;
+}
+
+/* ---------- v1.19 · Exoneraciones (solo admin, desde Tesorería → detalle de la persona) ---------- */
+
+function formularioExonerar(c) {
+  const pendiente = Math.round((c.monto - c.cubierto) * 100) / 100;
+  return `<div class="form-exo">
+      <p class="sub"><b>Exonerar ${esc(c.concepto)}</b>. Queda registrado con tu nombre y el motivo; se puede deshacer.</p>
+      <label class="campo" for="exo-motivo">Motivo</label>
+      <input type="text" id="exo-motivo" maxlength="200" placeholder="Ej.: viaje de trabajo, lesión, media beca">
+      <label class="campo" for="exo-monto">Monto a exonerar (S/) <span class="ayuda">· todo: ${soles(pendiente)}</span></label>
+      <input type="text" inputmode="decimal" id="exo-monto" value="${pendiente}" style="max-width:140px">
+      <div class="acciones">
+        <button class="boton secundario" onclick="estado.exonerando=null;pintar()">Cancelar</button>
+        <button class="boton" ${estado.ocupado ? 'disabled' : ''} onclick="exonerar('${esc(c.clave)}', ${pendiente})">Exonerar</button>
+      </div>
+    </div>`;
+}
+
+async function exonerar(clave, pendiente) {
+  const monto = Number(String(document.getElementById('exo-monto').value).replace(',', '.'));
+  const motivo = document.getElementById('exo-motivo').value.trim();
+  if (!(monto > 0) || monto > pendiente) return aviso(`El monto debe ser entre S/ 0 y ${soles(pendiente)}.`);
+  if (motivo.length < 4) return aviso('Escribe el motivo de la exoneración.');
+  if (await accionTeso('adminExonerar', estado.tesoCuenta.id, clave, monto, motivo)) {
+    estado.exonerando = null; pintar(); aviso('Exonerado. Queda registrado con el motivo.');
+  }
+}
+
+async function deshacerExoneracion(id) {
+  if (!confirm('¿Deshacer esta exoneración? El cobro vuelve a quedar pendiente de pago.')) return;
+  if (await accionTeso('adminAnularExoneracion', id)) aviso('Exoneración deshecha.');
 }
 
 /**
@@ -1164,6 +1244,7 @@ async function verCaptura(id) {
 }
 
 async function abrirPersona(id) {
+  estado.exonerando = null;
   if (estado.tesoCuenta && estado.tesoCuenta.id === id) { estado.tesoCuenta = null; return pintar(); }
   estado.tesoCuenta = { id, datos: null }; pintar();
   try { estado.tesoCuenta.datos = await api('tesoreriaCuenta', estado.token, id); }
@@ -1507,7 +1588,8 @@ function tarjetaCuadro(t) {
   const celda = x => x.t === 'pagado' ? `<td>${x.v}</td>`
     : x.t === 'parcial' ? `<td class="c-parcial" title="Pagó S/ ${x.v} de S/ ${q.cuota}">${x.v}</td>`
     : x.t === 'falta' ? '<td class="c-falta">F</td>'
-    : x.t === 'antes' ? '<td class="c-antes" title="Todavía no era del grupo">–</td>' : '<td></td>';
+    : x.t === 'antes' ? '<td class="c-antes" title="Todavía no era del grupo">–</td>'
+    : x.t === 'exonerado' ? '<td class="c-exo" title="Exonerado">Exo</td>' : '<td></td>';
   const totales = q.meses.map((_, i) => filas.reduce((a, p) => a + (p.cuadro[i].t === 'pagado' || p.cuadro[i].t === 'parcial' ? p.cuadro[i].v : 0), 0));
   return `<section class="tarjeta">
       <h2>${icono('lista')} Cuadro de cuotas ${esc(q.anio)}</h2>
@@ -1518,7 +1600,7 @@ function tarjetaCuadro(t) {
         <tbody>${filas.map(p => `<tr><th>${esc(p.nombre)}</th>${p.cuadro.map(celda).join('')}</tr>`).join('')}</tbody>
         <tfoot><tr><th>Total</th>${totales.map(x => `<td>${x || ''}</td>`).join('')}</tr></tfoot>
       </table></div>
-      <p class="leyenda-cuadro">15 = pagó · <span class="c-falta">F</span> = no pagó (vencido) · <span class="c-parcial">10</span> = pagó una parte · vacío = todavía no vence</p>` : ''}
+      <p class="leyenda-cuadro">15 = pagó · <span class="c-falta">F</span> = no pagó (vencido) · <span class="c-parcial">10</span> = pagó una parte · <span class="c-exo">Exo</span> = exonerado · vacío = todavía no vence</p>` : ''}
       <div class="acciones">
         <button class="boton secundario" onclick="estado.verCuadro=!estado.verCuadro;pintar()">${estado.verCuadro ? 'Ocultar cuadro' : 'Ver cuadro'}</button>
         <button class="boton" onclick="copiar(textoCuadroWhatsApp(estado.teso))">${icono('copiar')} Copiar para WhatsApp</button>
@@ -1550,6 +1632,290 @@ function textoCuadroWhatsApp(t0) {
   }
   lineas.push('', `Paga por Yape y reporta tu pago en la app 👉 ${location.origin}/`);
   return lineas.join('\n');
+}
+
+/* ============================================================
+ *  v1.20 · PERFILES: foto, apodo, cumpleaños, nivel, contacto y PIN
+ * ============================================================ */
+
+const NOMBRE_NIVEL = { H: 'H', H1: 'H1', H2: 'H2', H2O: 'H2O' };
+const insigniaNivel = n => n ? `<span class="nivel niv-${esc(n)}" title="Nivel ${esc(n)}">${esc(NOMBRE_NIVEL[n] || n)}</span>` : '';
+
+/* ---- Fotos: se guardan en el celular por versión, para no descargarlas cada vez ---- */
+function fotoDe(id, v) {
+  const x = estado.fotos[id];
+  return x && v && x.v === v ? x.f : '';
+}
+function guardarFotos() {
+  try { localStorage.setItem('ac_fotos', JSON.stringify(estado.fotos)); } catch (e) { /* sin espacio: no pasa nada */ }
+}
+function recibirFoto(id, v, f) {
+  if (v && f) estado.fotos[id] = { v, f }; else delete estado.fotos[id];
+}
+function recibirDirectorio(d) {
+  estado.dir = d;
+  const vivos = new Set();
+  d.personas.forEach(p => { recibirFoto(p.id, p.fotoV, p.foto); vivos.add(p.id); });
+  Object.keys(estado.fotos).forEach(id => { if (!vivos.has(id)) delete estado.fotos[id]; });
+  guardarFotos();
+  const yo = d.personas.find(p => p.id === estado.datos.yo.id);
+  if (yo) Object.assign(estado.datos.yo, { fotoV: yo.fotoV, apodo: yo.apodo, nivel: yo.nivel });
+}
+async function cargarDirectorio() {
+  try { recibirDirectorio(await api('directorio', estado.token)); pintar(); }
+  catch (e) { if (mensajeError(e).includes('SESION')) return cerrarSesion(); if (!estado.dir) aviso(mensajeError(e)); }
+}
+
+/** Foto redonda, o iniciales con un color propio de cada nombre. */
+function avatar(p, clase = '') {
+  const f = p.foto || fotoDe(p.id, p.fotoV);
+  if (f) return `<img class="av ${clase}" src="${esc(f)}" alt="">`;
+  const partes = String(p.nombre || '?').trim().split(/\s+/);
+  const ini = (partes[0][0] + (partes[1] ? partes[1][0] : '')).toUpperCase();
+  let h = 0; for (const ch of String(p.nombre)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `<span class="av sin-foto ${clase}" style="--tono:${h}" aria-hidden="true">${esc(ini)}</span>`;
+}
+
+/** "13 de junio" desde "06-13". */
+const textoCumple = c => c ? `${Number(c.slice(3))} de ${MESES_LARGOS[Number(c.slice(0, 2)) - 1]}` : '';
+const enlaceInstagram = u => `https://instagram.com/${encodeURIComponent(u)}`;
+
+/* ---- Inicio: hoy cumple… ---- */
+function tarjetaCumpleHoy(d) {
+  const k = d.cumpleanos;
+  if (!k || !k.hoy.length) return '';
+  const yoCumplo = k.hoy.some(x => x.id === d.yo.id);
+  const otros = k.hoy.filter(x => x.id !== d.yo.id);
+  const llamado = x => x.apodo || primerNombre(x.nombre);
+  const saludo = x => `¡Feliz cumpleaños, ${llamado(x)}! 🎉 Que la pases bonito. Un abrazo de ${primerNombre(d.yo.nombre)} · Agua Casinera`;
+  return `<section class="tarjeta cumple-hoy">
+      ${yoCumplo ? `<p class="cumple-titulo">🎉 ¡Feliz cumpleaños, ${esc(d.yo.apodo || primerNombre(d.yo.nombre))}!</p>
+        <p class="sub">Todo Agua Casinera te saluda hoy.</p>` : ''}
+      ${otros.map(x => `<div class="cumple-fila">
+          ${avatar({ id: x.id, nombre: x.nombre, fotoV: (estado.dir && (estado.dir.personas.find(p => p.id === x.id) || {}).fotoV) || '' }, 'chico')}
+          <p><b>${icono('pastel')} Hoy cumple ${esc(x.nombre)}</b>${x.apodo ? ` <span class="sub">(${esc(x.apodo)})</span>` : ''}</p>
+          ${x.whatsapp ? `<a class="boton whatsapp chico" target="_blank" rel="noopener" href="${enlaceWhatsApp(x.whatsapp, saludo(x))}">${icono('chat')} Saludar</a>` : ''}
+        </div>`).join('')}
+    </section>`;
+}
+
+/* ---- Pestaña Grupo: directorio ---- */
+function vistaGrupo() {
+  const d = estado.dir;
+  if (!d) return `<div class="cargando"><span class="ola"></span>Cargando el grupo…</div>`;
+  const q = estado.dirBusca.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const sinTilde = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const lista = d.personas.filter(p => (!estado.dirNivel || (estado.dirNivel === 'sin' ? !p.nivel : p.nivel === estado.dirNivel))
+    && (!q || sinTilde(p.nombre).includes(q) || sinTilde(p.apodo).includes(q)));
+  const cuenta = n => d.personas.filter(p => n === 'sin' ? !p.nivel : p.nivel === n).length;
+  const chip = (v, texto, n) => `<button class="chip" aria-pressed="${String(estado.dirNivel === v)}" onclick="estado.dirNivel='${v}';pintar()">${texto}${n !== undefined ? ` <span class="cuenta-chip">${n}</span>` : ''}</button>`;
+  const prox = d.cumpleanos.proximos.slice(0, 4);
+  return `
+    ${d.cumpleanos.hoy.length || prox.length ? `<section class="tarjeta">
+      <h2>${icono('pastel')} Cumpleaños</h2>
+      <ul class="cumples">${d.cumpleanos.hoy.map(x => `<li class="hoy"><b>${esc(x.nombre)}</b><span>¡Hoy! 🎉</span></li>`).join('')}
+        ${prox.map(x => `<li><b>${esc(x.nombre)}</b><span>${esc(x.texto)} · ${x.faltan === 1 ? 'mañana' : `en ${x.faltan} días`}</span></li>`).join('')}</ul>
+    </section>` : ''}
+    <section class="tarjeta">
+      <h2>${icono('personas')} El grupo <span class="insignia">${d.personas.length}</span></h2>
+      <label class="buscador">${icono('buscar')}<input type="search" id="dir-busca" placeholder="Buscar por nombre o apodo" value="${esc(estado.dirBusca)}"
+        oninput="estado.dirBusca=this.value;estado.enfocar='dir-busca';pintar()"></label>
+      <div class="chips" style="margin:10px 0 4px">
+        ${chip('', 'Todos')}
+        ${d.niveles.slice().reverse().filter(n => cuenta(n)).map(n => chip(n, n, cuenta(n))).join('')}
+        ${d.esAdmin && cuenta('sin') ? chip('sin', 'Sin nivel', cuenta('sin')) : ''}
+      </div>
+      <ul class="directorio">${lista.map(p => filaDirectorio(p, d)).join('') || '<li class="sub">No hay nadie con ese nombre.</li>'}</ul>
+    </section>`;
+}
+
+function filaDirectorio(p, d) {
+  const abierta = estado.dirAbierto === p.id, yo = p.id === estado.datos.yo.id;
+  return `<li class="persona-dir ${abierta ? 'abierta' : ''}">
+      <button class="fila-dir" aria-expanded="${String(abierta)}" onclick="estado.dirAbierto=estado.dirAbierto==='${esc(p.id)}'?null:'${esc(p.id)}';pintar()">
+        ${avatar(p)}
+        <span class="dir-nombre"><b>${esc(p.nombre)}${yo ? ' <small>(tú)</small>' : ''}</b>${p.apodo ? `<small>${esc(p.apodo)}</small>` : ''}</span>
+        ${insigniaNivel(p.nivel)}
+      </button>
+      ${abierta ? `<div class="dir-detalle">
+        ${p.foto ? `<img class="av grande" src="${esc(p.foto)}" alt="Foto de ${esc(p.nombre)}">` : ''}
+        <p class="sub">${[p.cumple ? `${icono('pastel')} ${textoCumple(p.cumple)}` : '', p.areas ? esc(p.areas) : ''].filter(Boolean).join(' · ') || 'Todavía no completó su perfil.'}</p>
+        <div class="acciones">
+          ${p.whatsapp ? `<a class="boton whatsapp" target="_blank" rel="noopener" href="https://wa.me/${p.whatsapp}">${icono('chat')} WhatsApp</a>` : ''}
+          ${p.instagram ? `<a class="boton secundario" target="_blank" rel="noopener" href="${enlaceInstagram(p.instagram)}">${icono('arroba')} ${esc(p.instagram)}</a>` : ''}
+          ${yo ? `<button class="boton secundario" onclick="abrirPerfil()">${icono('usuario')} Editar mi perfil</button>` : ''}
+        </div>
+        ${d.esAdmin ? `<div class="dir-admin">
+          <label class="campo" for="niv-${esc(p.id)}">Nivel <span class="ayuda">· lo pone la directiva</span></label>
+          <div class="en-linea">
+            <select id="niv-${esc(p.id)}" ${estado.ocupado ? 'disabled' : ''} onchange="ponerNivel('${esc(p.id)}', this.value)">
+              <option value="" ${!p.nivel ? 'selected' : ''}>Sin nivel</option>
+              ${d.niveles.map(n => `<option ${p.nivel === n ? 'selected' : ''}>${n}</option>`).join('')}
+            </select>
+            ${p.foto && !yo ? `<button class="enlace peque" onclick="quitarFotoDe('${esc(p.id)}')">Quitar foto</button>` : ''}
+          </div>
+        </div>` : ''}
+      </div>` : ''}
+    </li>`;
+}
+
+async function accionDir(funcion, ...args) {
+  if (estado.ocupado) return false;
+  estado.ocupado = true; pintar();
+  try { recibirDirectorio(await api(funcion, estado.token, ...args)); estado.ocupado = false; pintar(); return true; }
+  catch (e) { aviso(mensajeError(e)); }
+  estado.ocupado = false; pintar();
+  return false;
+}
+async function ponerNivel(id, nivel) {
+  const p = estado.dir.personas.find(x => x.id === id);
+  if (await accionDir('adminNivel', id, nivel)) aviso(nivel ? `${primerNombre(p.nombre)} ahora es ${nivel}.` : 'Nivel quitado.');
+}
+async function quitarFotoDe(id) {
+  if (!confirm('¿Quitar la foto de esta persona? Podrá subir otra.')) return;
+  if (await accionDir('adminQuitarFoto', id)) aviso('Foto quitada.');
+}
+
+/* ---- Mi perfil ---- */
+async function abrirPerfil() {
+  estado.menu = false; estado.vista = 'perfil';
+  if (!estado.perfil) {
+    pintar();
+    try { estado.perfil = await api('miPerfil', estado.token); }
+    catch (e) { aviso(mensajeError(e)); estado.vista = 'inicio'; return pintar(); }
+  }
+  formDesdePerfil();
+  pintar();
+  window.scrollTo(0, 0);
+}
+function formDesdePerfil() {
+  const p = estado.perfil;
+  estado.perfilForm = { apodo: p.apodo, mes: p.cumple ? p.cumple.slice(0, 2) : '', dia: p.cumple ? String(Number(p.cumple.slice(3))) : '',
+                        celular: p.celular, instagram: p.instagram, pinActual: '', pinNuevo: '', pinRepite: '' };
+}
+
+function vistaPerfil() {
+  const p = estado.perfil, f = estado.perfilForm, ocupado = estado.ocupado ? 'disabled' : '';
+  if (!p || !f) return `<div class="cargando"><span class="ola"></span>Cargando tu perfil…</div>`;
+  const yo = estado.datos.yo;
+  const rol = yo.rol === 'admin' ? 'Directiva' : (p.areas || 'Integrante');
+  const dias = n => Array.from({ length: n }, (_, i) => i + 1);
+  return `
+    <button class="enlace volver" onclick="irA('inicio')">← Volver</button>
+    <section class="tarjeta perfil">
+      <div class="perfil-cabeza">
+        <label class="foto-perfil" for="foto-input" title="Cambiar foto">
+          ${avatar(p, 'grande')}
+          <span class="cambiar-foto">${icono('camara')}</span>
+        </label>
+        <input type="file" id="foto-input" accept="image/*" hidden onchange="elegirFoto(this.files[0])">
+        <div>
+          <h1>${esc(p.nombre)}</h1>
+          <p class="sub">${p.nivel ? insigniaNivel(p.nivel) + ' · ' : ''}${esc(rol)}</p>
+          ${p.foto ? `<button class="enlace peque" ${ocupado} onclick="quitarMiFoto()">Quitar foto</button>`
+                   : `<label class="enlace peque" for="foto-input">Subir una foto</label>`}
+        </div>
+      </div>
+
+      <h3>Mis datos</h3>
+      <p class="sub" style="margin-top:-4px">Los verá todo el grupo en la pestaña Grupo. Puedes dejar en blanco lo que no quieras compartir.</p>
+      <label class="campo" for="pf-apodo">Apodo <span class="ayuda">· cómo te dicen en el grupo</span></label>
+      <input type="text" id="pf-apodo" maxlength="30" value="${esc(f.apodo)}" oninput="estado.perfilForm.apodo=this.value">
+      <p class="campo">Cumpleaños <span class="ayuda">· solo día y mes</span></p>
+      <div class="en-linea">
+        <select id="pf-dia" aria-label="Día" onchange="estado.perfilForm.dia=this.value">
+          <option value="">Día</option>${dias(31).map(n => `<option ${String(n) === f.dia ? 'selected' : ''}>${n}</option>`).join('')}
+        </select>
+        <select id="pf-mes" aria-label="Mes" onchange="estado.perfilForm.mes=this.value">
+          <option value="">Mes</option>${MESES_LARGOS.map((m, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${v === f.mes ? 'selected' : ''}>${mayuscula(m)}</option>`; }).join('')}
+        </select>
+      </div>
+      <label class="campo" for="pf-cel">Celular (WhatsApp)</label>
+      <input type="tel" id="pf-cel" inputmode="tel" placeholder="987 654 321" value="${esc(f.celular)}" oninput="estado.perfilForm.celular=this.value">
+      <label class="campo" for="pf-ig">Instagram</label>
+      <div class="con-prefijo"><span>@</span><input type="text" id="pf-ig" autocapitalize="none" placeholder="tu.usuario" value="${esc(f.instagram)}" oninput="estado.perfilForm.instagram=this.value"></div>
+      <div class="acciones"><button class="boton" ${ocupado} onclick="guardarMiPerfil()">Guardar cambios</button></div>
+    </section>
+
+    <section class="tarjeta">
+      <h2>${icono('llave')} Cambiar mi PIN</h2>
+      <p class="sub">Al cambiarlo, se cierra tu sesión en los otros celulares donde hayas entrado.</p>
+      <label class="campo" for="pin-actual">PIN actual</label>
+      <input type="password" id="pin-actual" inputmode="numeric" maxlength="4" autocomplete="current-password" value="${esc(f.pinActual)}" oninput="estado.perfilForm.pinActual=this.value" style="max-width:140px">
+      <div class="dos-col">
+        <div><label class="campo" for="pin-nuevo">PIN nuevo</label>
+          <input type="password" id="pin-nuevo" inputmode="numeric" maxlength="4" autocomplete="new-password" value="${esc(f.pinNuevo)}" oninput="estado.perfilForm.pinNuevo=this.value"></div>
+        <div><label class="campo" for="pin-repite">Repite el PIN nuevo</label>
+          <input type="password" id="pin-repite" inputmode="numeric" maxlength="4" autocomplete="new-password" value="${esc(f.pinRepite)}" oninput="estado.perfilForm.pinRepite=this.value"></div>
+      </div>
+      <div class="acciones"><button class="boton secundario" ${ocupado} onclick="cambiarMiPin()">Cambiar PIN</button></div>
+    </section>`;
+}
+
+/** Recorta la foto al centro (cuadrada) y la achica a 160×160: pesa ~10 KB. */
+function recortarFoto(archivo) {
+  return new Promise((ok, mal) => {
+    const url = URL.createObjectURL(archivo), img = new Image();
+    img.onload = () => {
+      const lado = Math.min(img.naturalWidth, img.naturalHeight), c = document.createElement('canvas');
+      c.width = c.height = 160;
+      c.getContext('2d').drawImage(img, (img.naturalWidth - lado) / 2, (img.naturalHeight - lado) / 2, lado, lado, 0, 0, 160, 160);
+      URL.revokeObjectURL(url);
+      ok(c.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); mal(new Error('No se pudo leer la imagen. Prueba con otra.')); };
+    img.src = url;
+  });
+}
+async function accionPerfil(funcion, ...args) {
+  if (estado.ocupado) return null;
+  estado.ocupado = true; pintar();
+  try {
+    const p = await api(funcion, estado.token, ...args);
+    estado.perfil = p;
+    recibirFoto(p.id, p.fotoV, p.foto); guardarFotos();
+    Object.assign(estado.datos.yo, { fotoV: p.fotoV, apodo: p.apodo, nivel: p.nivel });
+    if (estado.dir) { const i = estado.dir.personas.findIndex(x => x.id === p.id); if (i > -1) estado.dir.personas[i] = { ...estado.dir.personas[i], ...p }; }
+    guardarCopia(estado.datos);
+    estado.ocupado = false; pintar();
+    return p;
+  } catch (e) { aviso(mensajeError(e)); }
+  estado.ocupado = false; pintar();
+  return null;
+}
+async function elegirFoto(archivo) {
+  if (!archivo) return;
+  try { if (await accionPerfil('subirFoto', await recortarFoto(archivo))) aviso('Foto actualizada.'); }
+  catch (e) { aviso(mensajeError(e)); }
+}
+async function quitarMiFoto() {
+  if (!confirm('¿Quitar tu foto de perfil?')) return;
+  if (await accionPerfil('subirFoto', '')) aviso('Foto quitada.');
+}
+async function guardarMiPerfil() {
+  const f = estado.perfilForm;
+  if (!!f.dia !== !!f.mes) return aviso('Elige el día y el mes de tu cumpleaños (o deja los dos vacíos).');
+  const cumple = f.mes && f.dia ? `${f.mes}-${String(f.dia).padStart(2, '0')}` : '';
+  const pinActual = f.pinActual, pinNuevo = f.pinNuevo, pinRepite = f.pinRepite;
+  if (await accionPerfil('guardarPerfil', { apodo: f.apodo, cumple, celular: f.celular, instagram: f.instagram })) {
+    formDesdePerfil(); Object.assign(estado.perfilForm, { pinActual, pinNuevo, pinRepite }); pintar();
+    aviso('Perfil guardado.');
+  }
+}
+async function cambiarMiPin() {
+  const f = estado.perfilForm;
+  if (!/^\d{4}$/.test(f.pinActual)) return aviso('Escribe tu PIN actual (4 números).');
+  if (!/^\d{4}$/.test(f.pinNuevo)) return aviso('El PIN nuevo debe tener 4 números.');
+  if (f.pinNuevo !== f.pinRepite) return aviso('Los dos PIN nuevos no coinciden.');
+  if (estado.ocupado) return;
+  estado.ocupado = true; pintar();
+  try {
+    const r = await api('cambiarPin', estado.token, f.pinActual, f.pinNuevo);
+    estado.token = r.token; guardarToken(r.token); guardarCopia(estado.datos);
+    Object.assign(estado.perfilForm, { pinActual: '', pinNuevo: '', pinRepite: '' });
+    aviso('Listo: tu PIN cambió. Úsalo la próxima vez que entres.');
+  } catch (e) { aviso(mensajeError(e)); }
+  estado.ocupado = false; pintar();
 }
 
 /* ============================================================

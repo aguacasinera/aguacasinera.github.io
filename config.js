@@ -5,5 +5,5 @@
  */
 const CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbxJU0c7BmP6wllXI1e5WCfcsfpfp_cOFpapevBWhJxOdIJGjeAJWXXxF3bC0bHTYIVK/exec',
-  VERSION: '1.18'
+  VERSION: '1.20'
 };
