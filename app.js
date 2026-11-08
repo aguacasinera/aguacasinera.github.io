@@ -38,18 +38,28 @@ const estado = {
   cuenta: null,       // lo que devuelve miCuenta()
   verCuenta: false,
   pago: null,         // formulario "Reportar pago": { monto, metodo, nota, imagen, vista }
+  ultimoPago: null,   // v1.16 · el pago recién reportado, para enviarle la captura al cobrador por WhatsApp
   teso: null,         // lo que devuelve tesoreriaResumen()
   tesoCuenta: null,   // { id, datos } de la persona abierta en Tesorería
   rechazando: null,   // id del pago que se está rechazando
+  filtroCobro: '',    // v1.15 · admin: '' = todos · id de cobrador · 'sin' = sin cobrador
   capturas: {},       // id de pago → imagen (data URL) ya cargada
   cobro: { concepto: '', monto: '', tipo: 'polo', ids: [] },
-  efectivo: { id: '', monto: '', metodo: 'Efectivo', nota: '', fecha: '' }
+  efectivo: { id: '', monto: '', metodo: 'Efectivo', nota: '', fecha: '' },
+  // v1.18 · Caja y gastos, cuadro de cuotas
+  gasto: { concepto: '', monto: '', fecha: '', nota: '' },
+  editandoSaldo: false,
+  verTodosGastos: false,
+  verCuadro: false
 };
+
+const primerNombre = n => String(n || '').split(' ')[0];
 
 /* ---------- Íconos de línea (estilo Lucide, licencia ISC) ---------- */
 const ICONOS = {
   olas: '<path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  chat: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   reloj: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   musica: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
@@ -221,7 +231,7 @@ function cerrarSesion() {
   guardarToken(null);
   estado.token = null; estado.menu = false; estado.vista = 'inicio';
   estado.lista = null; estado.resumen = null; estado.cambios = {};
-  estado.cuenta = null; estado.verCuenta = false; estado.pago = null; estado.teso = null; estado.tesoCuenta = null; estado.capturas = {};
+  estado.cuenta = null; estado.verCuenta = false; estado.pago = null; estado.teso = null; estado.tesoCuenta = null; estado.capturas = {}; estado.filtroCobro = ''; estado.ultimoPago = null;
   mostrarAcceso();
 }
 
@@ -904,6 +914,8 @@ function tarjetaMiCuenta(d) {
   return `<section class="tarjeta" id="mi-cuenta">
     <h2>${icono('billetera')} Mis pagos</h2>
     ${cabecera}
+    ${s.cobrador ? `<p class="te-cobra">${icono('personas')} Te cobra <b>${esc(s.cobrador)}</b></p>` : ''}
+    ${estado.ultimoPago && k && k.cobradorCelular ? panelAvisarCobrador(k) : ''}
     ${s.porRevisar && !estado.verCuenta ? `<p class="sub">${s.porRevisar === 1 ? 'Un pago' : s.porRevisar + ' pagos'} (${soles(s.montoPorRevisar)}) esperando que Tesorería lo revise.</p>` : ''}
     ${estado.verCuenta && k ? detalleCuenta(k, false) : ''}
     ${estado.pago ? formularioPago(k) : ''}
@@ -971,9 +983,60 @@ function avisosDePagos(k) {
   const enRevision = k.pagos.filter(p => p.estado === 'pendiente');
   const rechazados = k.pagos.filter(p => p.estado === 'rechazado' && new Date(p.fecha) > hace60);
   return [
-    ...enRevision.map(p => `<p class="aviso-pago revision">${icono('reloj2')}<span><b>En revisión:</b> ${soles(p.monto)} por ${esc(p.metodo)} (enviado el ${esc(cuando(p.fecha))}). Se descuenta cuando Tesorería lo confirme.</span></p>`),
-    ...rechazados.map(p => `<p class="aviso-pago rechazado">${icono('x')}<span><b>Rechazado:</b> ${soles(p.monto)} del ${esc(cuando(p.fecha))}${p.motivoRechazo ? ` · ${esc(p.motivoRechazo)}` : ''}. Si ya pagaste, escríbele a Tesorería.</span></p>`)
+    ...enRevision.map(p => `<p class="aviso-pago revision">${icono('reloj2')}<span><b>En revisión:</b> ${soles(p.monto)} por ${esc(p.metodo)} (enviado el ${esc(cuando(p.fecha))}). Se descuenta cuando ${k.cobrador ? esc(primerNombre(k.cobrador)) : 'Tesorería'} lo confirme.${k.cobradorCelular
+      ? ` <a class="enlace" href="${enlaceWhatsApp(k.cobradorCelular, textoParaCobrador(k, { monto: p.monto, metodo: p.metodo, fecha: p.fecha }))}" target="_blank" rel="noopener">Escribirle por WhatsApp</a>` : ''}</span></p>`),
+    ...rechazados.map(p => `<p class="aviso-pago rechazado">${icono('x')}<span><b>Rechazado:</b> ${soles(p.monto)} del ${esc(cuando(p.fecha))}${p.motivoRechazo ? ` · ${esc(p.motivoRechazo)}` : ''}. Si ya pagaste, escríbele a ${k.cobrador ? esc(primerNombre(k.cobrador)) : 'Tesorería'}.</span></p>`)
   ].join('');
+}
+
+/* ---------- v1.16 · Enviar la captura al cobrador por WhatsApp ---------- */
+
+// ¿El celular puede compartir una imagen directo a WhatsApp? (Android y iPhone sí; la compu, casi nunca)
+const puedeCompartirArchivos = (() => {
+  try { return !!(navigator.canShare && navigator.canShare({ files: [new File([''], 'x.jpg', { type: 'image/jpeg' })] })); }
+  catch (e) { return false; }
+})();
+
+/** pago = { monto, metodo, imagen? , fecha? }. Con fecha = un pago que ya está en revisión hace rato. */
+function textoParaCobrador(k, pago) {
+  const yo = estado.datos && estado.datos.yo ? estado.datos.yo.nombre : '';
+  const hola = `Hola ${primerNombre(k.cobrador)}, soy ${yo} de Agua Casinera.`;
+  const detalle = `mi pago de ${soles(pago.monto)} por ${pago.metodo}`;
+  if (pago.fecha) return `${hola} Te escribo por ${detalle} que reporté en la app el ${cuando(pago.fecha).replace(/\.$/, "")}. ¿Me lo puedes confirmar? ¡Gracias!`;
+  return `${hola} ${pago.imagen ? 'Te envío la captura de' : 'Te aviso de'} ${detalle}, que acabo de reportar en la app. ¡Gracias!`;
+}
+const enlaceWhatsApp = (celular, texto) => `https://wa.me/${celular}?text=${encodeURIComponent(texto)}`;
+
+/** Panel que aparece justo después de reportar un pago. */
+function panelAvisarCobrador(k) {
+  const u = estado.ultimoPago, quien = esc(primerNombre(k.cobrador));
+  const conImagen = !!u.imagen && puedeCompartirArchivos;
+  return `<div class="avisa-cobrador">
+      <p><b>¿Le envías la captura a ${quien}?</b><br>
+        <span class="sub">Así lo confirma más rápido. ${conImagen ? `Se abrirá WhatsApp con tu captura: elige el chat de ${quien}.` : `Se abrirá su chat de WhatsApp${u.imagen ? ': adjunta la captura desde tu galería.' : '.'}`}</span></p>
+      <div class="acciones">
+        ${conImagen
+          ? `<button class="boton whatsapp" onclick="compartirCaptura()">${icono('chat')} Enviar captura a ${quien}</button>
+             <a class="boton secundario" href="${enlaceWhatsApp(k.cobradorCelular, textoParaCobrador(k, u))}" target="_blank" rel="noopener">Abrir su chat</a>`
+          : `<a class="boton whatsapp" href="${enlaceWhatsApp(k.cobradorCelular, textoParaCobrador(k, u))}" target="_blank" rel="noopener" onclick="setTimeout(()=>{estado.ultimoPago=null;pintar()},500)">${icono('chat')} Escribirle a ${quien}</a>`}
+      </div>
+      <button class="enlace peque" onclick="estado.ultimoPago=null;pintar()">Ahora no</button>
+    </div>`;
+}
+
+/** Comparte la captura (imagen + texto) con el menú del celular; si no se puede, abre el chat. */
+async function compartirCaptura() {
+  const k = estado.cuenta, u = estado.ultimoPago;
+  const texto = textoParaCobrador(k, u);
+  const bin = atob(u.imagen.base64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const archivo = new File([bytes], `pago-${hoyLima()}.jpg`, { type: 'image/jpeg' });
+  try {
+    await navigator.share({ files: [archivo], text: texto });
+    estado.ultimoPago = null; pintar();
+  } catch (e) {
+    if (e.name !== 'AbortError') window.open(enlaceWhatsApp(k.cobradorCelular, texto), '_blank');
+  }
 }
 
 async function alternarCuenta() {
@@ -1055,10 +1118,11 @@ async function enviarPago() {
   try {
     estado.cuenta = await api('reportarPago', estado.token, { monto, metodo: f.metodo, nota: f.nota, imagen: f.metodo === 'Efectivo' ? null : f.imagen });
     const k = estado.cuenta;   // la tarjeta de arriba usa los mismos datos que el detalle
-    estado.datos.miSaldo = { saldo: k.saldo, vencido: k.vencido, porRevisar: k.porRevisar, montoPorRevisar: k.montoPorRevisar,
+    estado.datos.miSaldo = { cobrador: k.cobrador, saldo: k.saldo, vencido: k.vencido, porRevisar: k.porRevisar, montoPorRevisar: k.montoPorRevisar,
                              falta: k.falta, porVencer: k.porVencer, porVencerTexto: k.porVencerTexto, desdeTexto: k.desdeTexto };
+    estado.ultimoPago = { monto, metodo: f.metodo, imagen: f.metodo === 'Efectivo' ? null : f.imagen };
     estado.pago = null; estado.verCuenta = true;
-    aviso('Listo. Tesorería revisará tu pago.');
+    aviso(k.cobrador ? `Listo. ${primerNombre(k.cobrador)} revisará tu pago.` : 'Listo. Tesorería revisará tu pago.');
   } catch (e) { aviso(mensajeError(e)); }
   estado.ocupado = false; pintar();
 }
@@ -1123,7 +1187,7 @@ async function registrarEfectivo() {
   if (!(monto > 0)) return aviso('Escribe el monto.');
   if (await accionTeso('registrarPago', f.id, { monto, metodo: f.metodo, nota: f.nota, fecha: f.fecha || hoyLima() })) {
     estado.efectivo = { id: '', monto: '', metodo: 'Efectivo', nota: '', fecha: '' };
-    aviso('Pago registrado y confirmado.');
+    pintar(); aviso('Pago registrado y confirmado.');
   }
 }
 
@@ -1136,7 +1200,7 @@ async function crearCobro() {
   if (!confirm(`¿Cobrar ${soles(monto)} por "${f.concepto}" a ${f.ids.length} ${f.ids.length === 1 ? 'persona' : 'personas'}?`)) return;
   if (await accionTeso('crearCargo', { concepto: f.concepto, monto, tipo: f.tipo, miembroIds: f.ids })) {
     estado.cobro = { concepto: '', monto: '', tipo: 'polo', ids: [] };
-    aviso('Cobro creado.');
+    pintar(); aviso('Cobro creado.');
   }
 }
 
@@ -1147,9 +1211,84 @@ function alternarEnCobro(id) {
   pintar();
 }
 
+/* ---------- v1.15 · Grupos de cobro ---------- */
+
+
+/** Admin: qué personas se ven según el filtro elegido (todos / un cobrador / sin cobrador). */
+function filtrarPorCobrador(t) {
+  const f = estado.filtroCobro;
+  const pasa = idCobrador => !t.esAdmin || !f || (f === 'sin' ? !idCobrador : idCobrador === f);
+  const personas = t.personas.filter(p => pasa(p.cobrador));
+  const ids = new Set(personas.map(p => p.id));
+  const sum = (k, fn = x => x) => personas.reduce((a, p) => a + fn(p[k]), 0);
+  return {
+    personas,
+    porRevisar: t.porRevisar.filter(p => !t.esAdmin || !f || ids.has(p.miembroId)),
+    porCobrar: f ? sum('saldo', x => Math.max(0, x)) : t.porCobrar,
+    vencido: f ? sum('vencido') : t.vencido,
+    recaudadoMes: f ? sum('cobradoMes') : t.recaudadoMes
+  };
+}
+
+/** Admin: tarjeta con los grupos, el filtro y el botón para repartir. */
+function tarjetaGrupos(t) {
+  if (!t.esAdmin) return '';
+  if (!t.cobradores.length) return `<section class="tarjeta">
+      <h2>${icono('personas')} Grupos de cobro</h2>
+      <p class="sub">Nadie tiene el área Tesorería. Escribe "Tesorería" en la columna <b>areas</b> de la hoja Miembros para quienes cobran.</p>
+    </section>`;
+  const tam = t.cobradores.map(c => c.cantidad);
+  const desparejo = t.sinCobrador > 0 || Math.max(...tam) - Math.min(...tam) > 1;
+  const chip = (valor, texto, n) => `<button class="chip" aria-pressed="${String(estado.filtroCobro === valor)}"
+      onclick="estado.filtroCobro='${esc(valor)}';estado.tesoCuenta=null;pintar()">${texto} <span class="cuenta-chip">${n}</span></button>`;
+  const total = t.cobradores.reduce((a, c) => a + c.cantidad, 0) + t.sinCobrador;
+  return `<section class="tarjeta">
+      <h2>${icono('personas')} Grupos de cobro</h2>
+      <p class="sub" style="margin-bottom:10px">Cada persona de Tesorería ve y cobra solo a su grupo. Tú ves a todos.</p>
+      <div class="chips">
+        ${chip('', 'Todos', total)}
+        ${t.cobradores.map(c => chip(c.id, esc(primerNombre(c.nombre)), c.cantidad)).join('')}
+        ${t.sinCobrador ? chip('sin', 'Sin cobrador', t.sinCobrador) : ''}
+      </div>
+      ${desparejo ? `<p class="aviso-pago revision" style="margin-top:12px">${icono('reloj')}<span>${t.sinCobrador
+          ? `${t.sinCobrador === 1 ? 'Hay 1 persona' : `Hay ${t.sinCobrador} personas`} sin cobrador: las ve toda Tesorería hasta que repartas.`
+          : 'Los grupos no están parejos.'}</span></p>` : ''}
+      <div class="acciones">
+        <button class="boton ${desparejo ? '' : 'secundario'}" ${estado.ocupado ? 'disabled' : ''} onclick="repartirCobros()">Repartir en partes iguales</button>
+      </div>
+      <p class="sub">Solo mueve a quien haga falta: quien ya tiene cobrador se queda con él si su grupo no tiene de más.</p>
+    </section>`;
+}
+
+async function repartirCobros() {
+  const n = estado.teso.cobradores.length;
+  if (!confirm(`¿Repartir a los miembros activos en ${n} ${n === 1 ? 'grupo' : 'grupos'} iguales? Se moverá solo a quien haga falta.`)) return;
+  if (await accionTeso('adminRepartirCobros')) aviso('Listo: grupos repartidos.');
+}
+
+/** Admin, en el detalle de una persona: quién le cobra. */
+function selectorCobrador(t, p) {
+  if (!t.esAdmin || !t.cobradores.length) return '';
+  const opciones = t.cobradores.filter(c => c.id !== p.id);
+  return `<div class="le-cobra">
+      <label class="campo" for="cob-${esc(p.id)}">Le cobra</label>
+      <select id="cob-${esc(p.id)}" ${estado.ocupado ? 'disabled' : ''} onchange="cambiarCobrador('${esc(p.id)}', this.value)">
+        <option value="" ${!p.cobrador ? 'selected' : ''}>Sin cobrador</option>
+        ${opciones.map(c => `<option value="${esc(c.id)}" ${p.cobrador === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}
+      </select>
+    </div>`;
+}
+
+async function cambiarCobrador(id, cobradorId) {
+  const c = estado.teso.cobradores.find(x => x.id === cobradorId);
+  if (await accionTeso('adminAsignarCobrador', id, cobradorId)) aviso(c ? `Ahora le cobra ${primerNombre(c.nombre)}.` : 'Quedó sin cobrador.');
+}
+
 function vistaTesoreria() {
-  const t = estado.teso, ocupado = estado.ocupado ? 'disabled' : '';
-  if (!t) return `<div class="cargando"><span class="ola"></span>Cargando Tesorería…</div>`;
+  const t0 = estado.teso, ocupado = estado.ocupado ? 'disabled' : '';
+  if (!t0) return `<div class="cargando"><span class="ola"></span>Cargando Tesorería…</div>`;
+  const t = { ...t0, ...filtrarPorCobrador(t0) };
+  const nombreCobrador = id => primerNombre((t.cobradores.find(c => c.id === id) || {}).nombre);
 
   const revisar = t.porRevisar.map(p => `
     <li class="por-revisar">
@@ -1177,10 +1316,12 @@ function vistaTesoreria() {
     return `<li class="persona-cuenta">
       <button class="fila-cuenta" aria-expanded="${String(abierta)}" onclick="abrirPersona('${esc(p.id)}')">
         <span class="nombre-cuenta">${esc(p.nombre)}${p.porRevisar ? ` <span class="insignia tarde">${p.porRevisar} por revisar</span>` : ''}
+          ${t.esAdmin && !estado.filtroCobro && p.cobrador ? `<span class="insignia">${esc(nombreCobrador(p.cobrador))}</span>` : ''}
+          ${!p.cobrador && (t.esAdmin ? !estado.filtroCobro : t.personas.some(x => x.cobrador)) ? `<span class="insignia sin-aviso">Sin cobrador</span>` : ''}
           ${p.vencido > 0 ? desgloseFalta(p.falta) : p.porVencer ? `<span class="desglose">Mes en curso ${soles(p.porVencer)} por pagar</span>` : ''}</span>
         <b class="${p.vencido > 0 ? 'debe' : 'aldia'}">${p.vencido > 0 ? 'Falta pagar ' + soles(p.saldo) : icono('check') + ' Cuotas al día'}</b>
       </button>
-      ${abierta ? (estado.tesoCuenta.datos ? detalleCuenta(estado.tesoCuenta.datos, true) : '<p class="sub">Cargando…</p>') : ''}
+      ${abierta ? selectorCobrador(t, p) + (estado.tesoCuenta.datos ? detalleCuenta(estado.tesoCuenta.datos, true) : '<p class="sub">Cargando…</p>') : ''}
     </li>`;
   }).join('');
 
@@ -1188,18 +1329,22 @@ function vistaTesoreria() {
   return `
     <section class="tarjeta">
       <h2>${icono('billetera')} Tesorería</h2>
-      <p class="sub" style="margin:-6px 0 10px">Cuotas desde ${esc(t.desdeTexto)} hasta hoy.</p>
+      <p class="sub" style="margin:-6px 0 10px">${t.esAdmin
+        ? (estado.filtroCobro === 'sin' ? 'Personas sin cobrador · ' : estado.filtroCobro ? `Grupo de ${esc(nombreCobrador(estado.filtroCobro))} · ` : 'Todo el grupo · ')
+        : `Tu grupo: ${t.miembros.length} ${t.miembros.length === 1 ? 'persona' : 'personas'} · `}cuotas desde ${esc(t.desdeTexto)} hasta hoy.</p>
       <div class="cifras">
         <div><b>${soles(t.porCobrar)}</b><small>Por cobrar</small></div>
         <div><b>${soles(t.vencido)}</b><small>Vencido</small></div>
         <div><b>${soles(t.recaudadoMes)}</b><small>Cobrado en ${esc(t.mesTexto)}</small></div>
       </div>
     </section>
-
+    ${tarjetaGrupos(t0)}
     <section class="tarjeta">
       <h2>Pagos por revisar <span class="insignia">${t.porRevisar.length}</span></h2>
       ${t.porRevisar.length ? `<ul class="cobros">${revisar}</ul>` : '<p class="sub">No hay pagos pendientes de revisión.</p>'}
     </section>
+
+    ${tarjetaCuadro(t)}
 
     <section class="tarjeta">
       <h2>Cuentas por persona</h2>
@@ -1245,7 +1390,166 @@ function vistaTesoreria() {
       </div>
       <div class="chips">${t.miembros.map(m => `<button class="chip" aria-pressed="${String(c.ids.includes(m.id))}" onclick="alternarEnCobro('${esc(m.id)}')">${c.ids.includes(m.id) ? icono('check') : ''}${esc(m.nombre)}</button>`).join('')}</div>
       <div class="acciones"><button class="boton" ${ocupado} onclick="crearCobro()">Crear cobro</button></div>
+    </section>
+
+    ${tarjetaCaja(t0)}`;
+}
+
+/* ============================================================
+ *  v1.18 · CAJA Y GASTOS (mejoras 1 y 2)
+ * ============================================================ */
+
+const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre'];
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'set', 'oct', 'nov', 'dic'];
+const mayuscula = t => t.charAt(0).toUpperCase() + t.slice(1);
+/** "2026-11-07" → "7 nov" */
+const fechaCorta = iso => iso ? `${Number(iso.slice(8, 10))} ${MESES_CORTOS[Number(iso.slice(5, 7)) - 1]}` : 'sin fecha';
+
+function tarjetaCaja(t) {
+  const k = t.caja, g = estado.gasto, ocupado = estado.ocupado ? 'disabled' : '';
+  if (!k) return '';
+  // Gastos agrupados por mes, lo más nuevo arriba
+  const lista = estado.verTodosGastos ? t.gastos : t.gastos.slice(0, 8);
+  const grupos = [];
+  lista.forEach(x => {
+    const mes = x.fecha ? x.fecha.slice(0, 7) : '';
+    let gr = grupos.find(y => y.mes === mes);
+    if (!gr) { gr = { mes, items: [] }; grupos.push(gr); }
+    gr.items.push(x);
+  });
+  const totalMes = mes => t.gastos.filter(x => (x.fecha || '').slice(0, 7) === mes).reduce((a, x) => a + x.monto, 0);
+  const gastosHtml = grupos.map(gr => `
+      <p class="mes-gastos"><span>${gr.mes ? mayuscula(MESES_LARGOS[Number(gr.mes.slice(5)) - 1]) + ' ' + gr.mes.slice(0, 4) : 'Sin fecha'}</span><b>${soles(totalMes(gr.mes))}</b></p>
+      <ul class="cobros">${gr.items.map(x => `
+        <li><div class="cobro-fila"><span>${esc(x.concepto)}</span><b>${soles(x.monto)}</b></div>
+          <p class="sub">${fechaCorta(x.fecha)}${x.registradoPor ? ' · ' + esc(primerNombre(x.registradoPor)) : ' · en la Sheet'}${x.nota ? ' · ' + esc(x.nota) : ''}
+          ${x.puedeAnular ? ` · <button class="enlace peque" ${ocupado} onclick="anularGasto('${esc(x.id)}')">Anular</button>` : ''}</p></li>`).join('')}
+      </ul>`).join('');
+
+  return `<section class="tarjeta" id="caja">
+      <h2>${icono('billetera')} Caja del grupo</h2>
+      <div class="caja-total ${k.caja < 0 ? 'negativa' : ''}"><small>En caja ahora</small><b>${soles(k.caja)}</b></div>
+      <div class="cifras">
+        <div><b>${soles(k.saldoInicial)}</b><small>Saldo inicial</small></div>
+        <div><b>${soles(k.recaudado)}</b><small>Cobrado</small></div>
+        <div><b>${soles(k.gastos)}</b><small>Gastado</small></div>
+      </div>
+      <p class="sub" style="margin-top:8px">En ${esc(k.mesTexto)}: cobrado ${soles(k.recaudadoMes)} · gastado ${soles(k.gastosMes)}.</p>
+      ${t.esAdmin ? (estado.editandoSaldo ? `
+        <div class="fila-saldo">
+          <label class="campo" for="saldo-inicial">Saldo inicial (S/) <span class="ayuda">· lo que había en caja antes de cobrar con la app</span></label>
+          <div class="en-linea">
+            <input type="text" inputmode="decimal" id="saldo-inicial" value="${esc(String(k.saldoInicial))}">
+            <button class="boton" ${ocupado} onclick="guardarSaldoInicial()">Guardar</button>
+            <button class="boton secundario" onclick="estado.editandoSaldo=false;pintar()">Cancelar</button>
+          </div>
+        </div>` : `<button class="enlace peque" onclick="estado.editandoSaldo=true;pintar()">Cambiar saldo inicial</button>`) : ''}
+
+      <h3>Registrar un gasto</h3>
+      <div class="dos-col">
+        <div><label class="campo" for="ga-concepto">¿Qué se compró?</label>
+          <input type="text" id="ga-concepto" maxlength="100" placeholder="Ej.: Taxi profesor" value="${esc(g.concepto)}" oninput="estado.gasto.concepto=this.value"></div>
+        <div><label class="campo" for="ga-monto">Monto (S/)</label>
+          <input type="text" inputmode="decimal" id="ga-monto" value="${esc(g.monto)}" oninput="estado.gasto.monto=this.value"></div>
+      </div>
+      <label class="campo" for="ga-fecha">Fecha</label>
+      <input type="date" id="ga-fecha" max="${hoyLima()}" value="${esc(g.fecha || hoyLima())}" onchange="estado.gasto.fecha=this.value" style="max-width:200px">
+      <label class="campo" for="ga-nota">Nota <span class="ayuda">· opcional</span></label>
+      <input type="text" id="ga-nota" maxlength="200" value="${esc(g.nota)}" oninput="estado.gasto.nota=this.value">
+      <div class="acciones"><button class="boton" ${ocupado} onclick="registrarGasto()">Registrar gasto</button></div>
+
+      <h3>Gastos</h3>
+      ${t.gastos.length ? gastosHtml : '<p class="sub">Todavía no hay gastos registrados.</p>'}
+      ${t.gastos.length > 8 ? `<button class="enlace peque" onclick="estado.verTodosGastos=!estado.verTodosGastos;pintar()">${estado.verTodosGastos ? 'Ver menos' : `Ver todos (${t.gastos.length})`}</button>` : ''}
     </section>`;
+}
+
+async function registrarGasto() {
+  const g = estado.gasto;
+  const monto = Number(String(g.monto).replace(',', '.'));
+  if (g.concepto.trim().length < 3) return aviso('Escribe qué se compró.');
+  if (!(monto > 0)) return aviso('Escribe el monto.');
+  if (await accionTeso('registrarGasto', { concepto: g.concepto, monto, fecha: g.fecha || hoyLima(), nota: g.nota })) {
+    estado.gasto = { concepto: '', monto: '', fecha: '', nota: '' };
+    pintar(); aviso('Gasto registrado.');
+  }
+}
+
+async function anularGasto(id) {
+  const g = estado.teso.gastos.find(x => x.id === id);
+  if (!confirm(`¿Anular el gasto "${g ? g.concepto : ''}"? Quedará en la Sheet como anulado.`)) return;
+  if (await accionTeso('anularGasto', id)) aviso('Gasto anulado.');
+}
+
+async function guardarSaldoInicial() {
+  const v = document.getElementById('saldo-inicial').value;
+  if (!isFinite(Number(String(v).replace(',', '.'))) || v === '') return aviso('Escribe un monto (puede ser 0).');
+  if (await accionTeso('adminSaldoInicial', v)) { estado.editandoSaldo = false; pintar(); aviso('Saldo inicial guardado.'); }
+}
+
+/* ============================================================
+ *  v1.18 · CUADRO DE CUOTAS (mejora 3): el mismo de la Sheet, solo del grupo que se ve
+ * ============================================================ */
+
+function nombreDelGrupo(t) {
+  if (!t.esAdmin) return `Grupo de ${primerNombre(estado.datos.yo.nombre)}`;
+  if (estado.filtroCobro === 'sin') return 'Sin cobrador';
+  if (estado.filtroCobro) return `Grupo de ${primerNombre((t.cobradores.find(c => c.id === estado.filtroCobro) || {}).nombre)}`;
+  return 'Todo el grupo';
+}
+
+function tarjetaCuadro(t) {
+  const q = t.cuadro;
+  if (!q) return '';
+  const filas = t.personas.filter(p => p.cuadro).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  if (!filas.length) return '';
+  const alDia = filas.filter(p => !p.vencido).length;
+  const celda = x => x.t === 'pagado' ? `<td>${x.v}</td>`
+    : x.t === 'parcial' ? `<td class="c-parcial" title="Pagó S/ ${x.v} de S/ ${q.cuota}">${x.v}</td>`
+    : x.t === 'falta' ? '<td class="c-falta">F</td>'
+    : x.t === 'antes' ? '<td class="c-antes" title="Todavía no era del grupo">–</td>' : '<td></td>';
+  const totales = q.meses.map((_, i) => filas.reduce((a, p) => a + (p.cuadro[i].t === 'pagado' || p.cuadro[i].t === 'parcial' ? p.cuadro[i].v : 0), 0));
+  return `<section class="tarjeta">
+      <h2>${icono('lista')} Cuadro de cuotas ${esc(q.anio)}</h2>
+      <p class="sub">${esc(nombreDelGrupo(t))} · <b>${alDia}</b> al día · <b>${filas.length - alDia}</b> ${filas.length - alDia === 1 ? 'debe' : 'deben'}</p>
+      ${estado.verCuadro ? `
+      <div class="cuadro-scroll"><table class="cuadro">
+        <thead><tr><th>Integrante</th>${q.meses.map(m => `<th>${mayuscula(MESES_CORTOS[Number(m.slice(5)) - 1])}</th>`).join('')}</tr></thead>
+        <tbody>${filas.map(p => `<tr><th>${esc(p.nombre)}</th>${p.cuadro.map(celda).join('')}</tr>`).join('')}</tbody>
+        <tfoot><tr><th>Total</th>${totales.map(x => `<td>${x || ''}</td>`).join('')}</tr></tfoot>
+      </table></div>
+      <p class="leyenda-cuadro">15 = pagó · <span class="c-falta">F</span> = no pagó (vencido) · <span class="c-parcial">10</span> = pagó una parte · vacío = todavía no vence</p>` : ''}
+      <div class="acciones">
+        <button class="boton secundario" onclick="estado.verCuadro=!estado.verCuadro;pintar()">${estado.verCuadro ? 'Ocultar cuadro' : 'Ver cuadro'}</button>
+        <button class="boton" onclick="copiar(textoCuadroWhatsApp(estado.teso))">${icono('copiar')} Copiar para WhatsApp</button>
+      </div>
+    </section>`;
+}
+
+/** Resumen corto para el chat del grupo: quién está al día y quién debe qué meses. */
+function textoCuadroWhatsApp(t0) {
+  const t = { ...t0, ...filtrarPorCobrador(t0) };
+  const q = t.cuadro;
+  const filas = t.personas.filter(p => p.cuadro).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const hoy = hoyLima();
+  const alDia = filas.filter(p => !p.vencido), deben = filas.filter(p => p.vencido > 0);
+  const lineas = [`*Cuotas ${q.anio} · ${nombreDelGrupo(t)}*`, `Al ${Number(hoy.slice(8))} de ${MESES_LARGOS[Number(hoy.slice(5, 7)) - 1]}`, ''];
+  if (alDia.length) lineas.push(`✅ *Al día (${alDia.length}):* ${alDia.map(p => p.nombre).join(', ')}`);
+  if (deben.length) {
+    lineas.push('', `❌ *Deben (${deben.length}):*`);
+    deben.forEach(p => {
+      const meses = [], cuotas = p.cuadro.reduce((a, x, i) => {
+        if (x.t === 'falta' || x.t === 'parcial') meses.push(MESES_CORTOS[Number(q.meses[i].slice(5)) - 1]);
+        return a + (x.t === 'falta' ? q.cuota : x.t === 'parcial' ? q.cuota - x.v : 0);
+      }, 0);
+      const otros = Math.round((p.vencido - cuotas) * 100) / 100;
+      const detalle = cuotas > 0 && otros > 0 ? `cuotas de ${meses.join(', ')} y ${soles(otros)} de penalidades u otros`
+        : cuotas > 0 ? meses.join(', ') : 'penalidades u otros';
+      lineas.push(`• ${p.nombre}: ${soles(p.vencido)} (${detalle})`);
+    });
+  }
+  lineas.push('', `Paga por Yape y reporta tu pago en la app 👉 ${location.origin}/`);
+  return lineas.join('\n');
 }
 
 /* ============================================================

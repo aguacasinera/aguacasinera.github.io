@@ -362,4 +362,51 @@
   @keyframes deslizar { from { background-position: -50% 0; } to { background-position: 150% 0; } }
   .boton[disabled], .opcion[disabled], .chip[disabled], .mini[disabled] { cursor: progress; }
 
+  /* ============ v1.15 · Grupos de cobro ============ */
+  .te-cobra { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--tinta-2); font-size: .92rem; }
+  .te-cobra svg { width: 16px; height: 16px; flex: none; }
+  .te-cobra b { color: var(--tinta); }
+  .cuenta-chip { font-size: .75rem; font-weight: 700; background: rgba(0,0,0,.08); border-radius: 999px; padding: 0 7px; margin-left: 2px; }
+  .chip[aria-pressed="true"] .cuenta-chip { background: rgba(255,255,255,.25); }
+  .nombre-cuenta .insignia { align-self: flex-start; width: fit-content; margin-top: 2px; }
+  .le-cobra { display: flex; align-items: center; gap: 10px; padding: 10px 12px 0; }
+  .le-cobra .campo { margin: 0; white-space: nowrap; }
+  .le-cobra select { flex: 1; min-width: 0; }
+
+  /* ============ v1.16 · Enviar la captura por WhatsApp ============ */
+  .avisa-cobrador { margin-top: 14px; padding: 14px; border-radius: 14px; background: #e9f8ef; border: 1px solid #bfe8cf; }
+  .avisa-cobrador p { margin: 0; }
+  .avisa-cobrador .acciones { margin-top: 12px; }
+  .avisa-cobrador .enlace.peque { display: block; margin: 10px auto 0; }
+  .boton.whatsapp { background: #1f8f4e; border-color: #1f8f4e; color: #fff; }
+  .boton.whatsapp:hover { background: #187a42; }
+  a.boton { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+
+  /* ============ v1.18 · Caja, gastos y cuadro de cuotas ============ */
+  .caja-total { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 12px 14px; margin-bottom: 10px;
+    border-radius: 14px; background: #e9f8ef; border: 1px solid #bfe8cf; }
+  .caja-total small { color: var(--tinta-2); font-size: .9rem; }
+  .caja-total b { font-family: var(--titulos); font-size: 1.8rem; color: #1f7a45; }
+  .caja-total.negativa { background: var(--sol-suave, #fff2cc); border-color: #f0d58a; }
+  .caja-total.negativa b { color: #a3312b; }
+  .tarjeta h3 { margin: 18px 0 8px; font-size: 1rem; }
+  #caja .cifras b { font-size: 1.15rem; white-space: nowrap; }
+  .fila-saldo { margin-top: 10px; }
+  .en-linea { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .en-linea input { flex: 1; min-width: 100px; max-width: 160px; }
+  .mes-gastos { display: flex; justify-content: space-between; margin: 12px 0 2px; font-weight: 700; font-size: .92rem;
+    padding: 4px 8px; background: var(--fondo); border-radius: 8px; }
+  .cuadro-scroll { overflow-x: auto; margin: 10px -4px 0; -webkit-overflow-scrolling: touch; }
+  table.cuadro { border-collapse: collapse; width: 100%; font-size: .86rem; font-variant-numeric: tabular-nums; }
+  table.cuadro th, table.cuadro td { border: 1px solid var(--borde); padding: 5px 6px; text-align: center; }
+  table.cuadro thead th { background: var(--fondo); font-weight: 700; }
+  table.cuadro tbody th, table.cuadro tfoot th { text-align: left; font-weight: 500; white-space: nowrap; max-width: 150px;
+    overflow: hidden; text-overflow: ellipsis; position: sticky; left: 0; background: var(--superficie); }
+  table.cuadro tfoot th, table.cuadro tfoot td { background: var(--fondo); font-weight: 700; }
+  .c-falta { background: #fac8c8; color: #c00000; font-weight: 700; }
+  .c-parcial { background: #fff2cc; color: #7a5208; }
+  .c-antes { background: #f3f3f3; color: #a6a6a6; }
+  .leyenda-cuadro { font-size: .78rem; color: var(--tinta-2); margin: 8px 0 0; }
+  .leyenda-cuadro span { padding: 0 4px; border-radius: 4px; }
+
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
