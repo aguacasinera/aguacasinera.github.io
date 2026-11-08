@@ -264,7 +264,7 @@ function pintar() {
   document.getElementById('app').innerHTML = `
     <header class="barra">
       <div class="marca"><span class="logo"><img src="iconos/logo-blanco.png" alt=""></span>${esc(d.grupo)}</div>
-      <button class="avatar" aria-label="Mi cuenta" aria-expanded="${String(estado.menu)}"
+      <button class="avatar" aria-label="Menú" aria-expanded="${String(estado.menu)}"
               onclick="estado.menu=!estado.menu;pintar()">${esc(d.yo.nombre.charAt(0).toUpperCase())}</button>
       ${estado.menu ? `<div class="menu">
           <p><strong>${esc(d.yo.nombre)}</strong>${rolTexto}</p>
@@ -847,9 +847,9 @@ function tarjetaMiCuenta(d) {
        ${s.porVencer ? `<p class="sub">Por pagar: ${soles(s.porVencer)}, ${esc(s.porVencerTexto)}.</p>` : ''}
        ${s.saldo < 0 ? `<p class="sub">Tienes ${soles(-s.saldo)} adelantado: se usará en los próximos cobros.</p>` : ''}`;
   return `<section class="tarjeta" id="mi-cuenta">
-    <h2>${icono('billetera')} Mi cuenta</h2>
+    <h2>${icono('billetera')} Mis pagos</h2>
     ${cabecera}
-    ${s.porRevisar ? `<p class="sub">${s.porRevisar === 1 ? 'Un pago' : s.porRevisar + ' pagos'} (${soles(s.montoPorRevisar)}) esperando que Tesorería lo revise.</p>` : ''}
+    ${s.porRevisar && !estado.verCuenta ? `<p class="sub">${s.porRevisar === 1 ? 'Un pago' : s.porRevisar + ' pagos'} (${soles(s.montoPorRevisar)}) esperando que Tesorería lo revise.</p>` : ''}
     ${estado.verCuenta && k ? detalleCuenta(k, false) : ''}
     ${estado.pago ? formularioPago(k) : ''}
     <div class="acciones">
@@ -901,9 +901,24 @@ function detalleCuenta(k, editable) {
         <div class="${falta ? 'falta' : 'ok'}"><b>${soles(falta)}</b><small>${k.saldo < 0 ? 'Adelantado ' + soles(-k.saldo) : 'Falta'}</small></div>
       </div>
     </div>
+    ${editable ? '' : avisosDePagos(k)}
     <h3>Cobros</h3><ul class="cobros">${cobros}</ul>
-    <h3>Pagos</h3><ul class="cobros">${pagos}</ul>
+    ${editable ? `<h3>Pagos</h3><ul class="cobros">${pagos}</ul>` : ''}
   </div>`;
+}
+
+/**
+ * En "Mis pagos" no se muestra la lista de pagos (los cobros ya dicen qué está pagado).
+ * Solo se avisa lo que el cobro no dice: pagos que Tesorería todavía no revisa y pagos rechazados.
+ */
+function avisosDePagos(k) {
+  const hace60 = Date.now() - 60 * 24 * 3600 * 1000;
+  const enRevision = k.pagos.filter(p => p.estado === 'pendiente');
+  const rechazados = k.pagos.filter(p => p.estado === 'rechazado' && new Date(p.fecha) > hace60);
+  return [
+    ...enRevision.map(p => `<p class="aviso-pago revision">${icono('reloj2')}<span><b>En revisión:</b> ${soles(p.monto)} por ${esc(p.metodo)} (enviado el ${esc(cuando(p.fecha))}). Se descuenta cuando Tesorería lo confirme.</span></p>`),
+    ...rechazados.map(p => `<p class="aviso-pago rechazado">${icono('x')}<span><b>Rechazado:</b> ${soles(p.monto)} del ${esc(cuando(p.fecha))}${p.motivoRechazo ? ` · ${esc(p.motivoRechazo)}` : ''}. Si ya pagaste, escríbele a Tesorería.</span></p>`)
+  ].join('');
 }
 
 async function alternarCuenta() {

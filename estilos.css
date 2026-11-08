@@ -320,6 +320,10 @@
   .resumen-cuenta .cifras b { font-size: 1.15rem; }
   .resumen-cuenta .cifras .falta b { color: var(--primario-oscuro); }
   .resumen-cuenta .cifras .ok b { color: #1d6b3a; }
+  .aviso-pago { display: flex; gap: 8px; align-items: flex-start; border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: .9rem; }
+  .aviso-pago .icono { margin-top: 2px; }
+  .aviso-pago.revision { background: var(--sol-suave); color: #6b4706; }
+  .aviso-pago.rechazado { background: var(--primario-suave); color: var(--primario-oscuro); }
   .p-historial { background: var(--carbon-suave); color: var(--tinta-2); }
   .desglose { font-size: .86rem; color: var(--tinta-2); margin: 2px 0 6px; }
   .nombre-cuenta { display: flex; flex-direction: column; }
