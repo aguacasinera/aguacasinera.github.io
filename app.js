@@ -1692,12 +1692,30 @@ function recibirFoto(id, v, f) {
 }
 function recibirDirectorio(d) {
   estado.dir = d;
-  const vivos = new Set();
-  d.personas.forEach(p => { recibirFoto(p.id, p.fotoV, p.foto); vivos.add(p.id); });
+  // v1.23: el directorio trae solo la versión de cada foto (fotoV). Se piden aparte las que faltan o cambiaron.
+  const vivos = new Set(), faltan = [];
+  d.personas.forEach(p => {
+    vivos.add(p.id);
+    if (p.foto !== undefined) recibirFoto(p.id, p.fotoV, p.foto);          // respuestas que sí traen la foto
+    else if (!p.fotoV) delete estado.fotos[p.id];                         // quitó su foto
+    else if (!fotoDe(p.id, p.fotoV)) faltan.push(p.id);                   // nueva o cambió
+  });
   Object.keys(estado.fotos).forEach(id => { if (!vivos.has(id)) delete estado.fotos[id]; });
   guardarFotos();
+  if (faltan.length) traerFotos(faltan);
   const yo = d.personas.find(p => p.id === estado.datos.yo.id);
   if (yo) Object.assign(estado.datos.yo, { fotoV: yo.fotoV, apodo: yo.apodo, nivel: yo.nivel });
+}
+let trayendoFotos = false;
+async function traerFotos(ids) {
+  if (trayendoFotos) return;
+  trayendoFotos = true;
+  try {
+    const r = await api('fotos', estado.token, ids);
+    Object.keys(r).forEach(id => recibirFoto(id, r[id].v, r[id].f));
+    guardarFotos(); pintar();
+  } catch (e) { /* sin fotos: se ven las iniciales */ }
+  trayendoFotos = false;
 }
 async function cargarDirectorio() {
   try { recibirDirectorio(await api('directorio', estado.token)); pintar(); }
@@ -1776,7 +1794,7 @@ function filaDirectorio(p, d) {
         ${insigniaNivel(p.nivel)}
       </button>
       ${abierta ? `<div class="dir-detalle">
-        ${p.foto ? `<img class="av grande" src="${esc(p.foto)}" alt="Foto de ${esc(p.nombre)}">` : ''}
+        ${fotoDe(p.id, p.fotoV) ? `<img class="av grande" src="${esc(fotoDe(p.id, p.fotoV))}" alt="Foto de ${esc(p.nombre)}">` : ''}
         <p class="sub">${[p.cumple ? `${icono('pastel')} ${textoCumple(p.cumple)}` : '', p.areas ? esc(p.areas) : ''].filter(Boolean).join(' · ') || 'Todavía no completó su perfil.'}</p>
         <div class="acciones">
           ${p.whatsapp ? `<a class="boton whatsapp" target="_blank" rel="noopener" href="https://wa.me/${p.whatsapp}">${icono('chat')} WhatsApp</a>` : ''}
@@ -1790,7 +1808,7 @@ function filaDirectorio(p, d) {
               <option value="" ${!p.nivel ? 'selected' : ''}>Sin nivel</option>
               ${d.niveles.map(n => `<option ${p.nivel === n ? 'selected' : ''}>${n}</option>`).join('')}
             </select>
-            ${p.foto && !yo ? `<button class="enlace peque" onclick="quitarFotoDe('${esc(p.id)}')">Quitar foto</button>` : ''}
+            ${p.fotoV && !yo ? `<button class="enlace peque" onclick="quitarFotoDe('${esc(p.id)}')">Quitar foto</button>` : ''}
           </div>
         </div>` : ''}
       </div>` : ''}
@@ -2175,6 +2193,17 @@ function refrescarInstalar() {
 if ('serviceWorker' in navigator) {
   // updateViaCache: 'none' = el celular revisa si hay un service worker nuevo sin usar copias guardadas
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
+  // v1.23 · La app abre con lo guardado en el celular. Si al abrir se descarga una versión nueva,
+  // se recarga sola una vez (salvo que estés escribiendo: entonces se aplica la próxima vez que abras).
+  const habiaVersion = !!navigator.serviceWorker.controller;      // la primera instalación no recarga
+  let recargando = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!habiaVersion || recargando) return;
+    const escribiendo = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '') || estado.pago || estado.ocupado;
+    if (escribiendo) return aviso('Hay una versión nueva de la app: se verá la próxima vez que la abras.');
+    recargando = true;
+    location.reload();
+  });
 }
 
 /* Actualiza el "Quedan X h" cada minuto sin redibujar todo (para no borrar lo que escribes) */
