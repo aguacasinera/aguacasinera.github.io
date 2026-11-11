@@ -590,7 +590,7 @@ function tarjetaResumen(s) {
       <div><b>${s.noVoy}</b><small>No van</small></div>
       <div><b>${s.sinResponder}</b><small>Sin responder</small></div>
     </div>
-    ${s.deLicencia ? `<p class="sub" style="margin-top:8px">${icono('maleta')} ${s.deLicencia === 1 ? '1 persona está' : s.deLicencia + ' personas están'} de licencia.</p>` : ''}
+    ${s.deLicencia ? `<p class="sub" style="margin-top:8px">${icono('maleta')} ${s.deLicencia === 1 ? '1 persona está' : s.deLicencia + ' personas están'} de licencia para este ensayo.</p>` : ''}
     </section>`;
 }
 
@@ -893,7 +893,7 @@ function vistaDirectiva(d) {
     ${tarjetaLicenciasAdmin(a)}
     <section class="tarjeta">
       <h2>Respuestas · ${esc(e.fechaTexto)}</h2>
-      ${grupo('Van', 'check', a.voy, true, m => `<li>${esc(m.nombre)}
+      ${grupo('Van', 'check', a.voy, true, m => `<li>${esc(m.nombre)}${m.licencia ? ' <span class="insignia">De licencia, igual va</span>' : ''}
           ${m.social === 'si' ? '<span class="insignia">Se queda al social</span>' : ''}
           ${m.social === 'quizas' ? '<span class="insignia">Social: quizás</span>' : ''}</li>`)}
       ${grupo('Llegan tarde', 'reloj2', a.llegaTarde || [], true, m => `<li>${esc(m.nombre)}
@@ -902,7 +902,7 @@ function vistaDirectiva(d) {
       ${grupo('No van', 'x', a.noVoy, true, m => `<li>${esc(m.nombre)}${insigniaAvisoCorta(m)}
           ${m.motivo ? `<span class="motivo">${esc(m.motivo)}</span>` : ''}</li>`)}
       ${grupo('Sin responder', 'reloj', a.sinResponder, false, n => `<li>${esc(n)}</li>`)}
-      ${(a.deLicencia || []).length ? grupo('De licencia', 'maleta', a.deLicencia, false, m => `<li>${esc(m.nombre)} <span class="insignia">vuelve el ${esc(m.regreso)}</span></li>`) : ''}
+      ${(a.deLicencia || []).length ? grupo('De licencia', 'maleta', a.deLicencia, false, m => `<li>${esc(m.nombre)} <span class="insignia">vuelve el ${esc(m.regreso)}</span>${m.avisoNoVa ? '<span class="motivo">También avisó que no va</span>' : ''}</li>`) : ''}
     </section>
 
     <section class="tarjeta">
