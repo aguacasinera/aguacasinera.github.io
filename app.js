@@ -80,6 +80,9 @@ const ICONOS = {
   usuario: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
   llave: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
   arroba: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
+  sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  luna: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  celular: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
   maleta: '<rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   reloj: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
@@ -196,6 +199,27 @@ function mensajeError(e) {
 }
 
 function leerToken() { try { return localStorage.getItem('ac_token'); } catch (e) { return null; } }
+/* ---------- v1.22 · Tema claro / oscuro (sistema de diseño: data-theme="oscuro" en <html>) ----------
+ * Preferencia de cada celular en localStorage.ac_tema: 'auto' (sigue al teléfono), 'claro' u 'oscuro'.
+ * index.html ya la aplica antes de pintar (para que no "parpadee" en blanco); aquí se mantiene al día. */
+const temaDelTelefono = window.matchMedia('(prefers-color-scheme: dark)');
+function preferenciaTema() { try { return localStorage.getItem('ac_tema') || 'auto'; } catch (e) { return 'auto'; } }
+function aplicarTema() {
+  const pref = preferenciaTema();
+  const oscuro = pref === 'oscuro' || (pref === 'auto' && temaDelTelefono.matches);
+  document.documentElement.setAttribute('data-theme', oscuro ? 'oscuro' : 'claro');
+  // Barra del navegador en Android: negro en claro (identidad), el fondo en oscuro
+  const meta = document.querySelector('meta[name="theme-color"]');
+  const color = getComputedStyle(document.documentElement).getPropertyValue(oscuro ? '--fondo' : '--negro').trim();
+  if (meta && color) meta.setAttribute('content', color);
+}
+function elegirTema(t) {
+  try { t === 'auto' ? localStorage.removeItem('ac_tema') : localStorage.setItem('ac_tema', t); } catch (e) {}
+  aplicarTema(); pintar();
+}
+temaDelTelefono.addEventListener('change', () => { if (preferenciaTema() === 'auto') aplicarTema(); });
+aplicarTema();
+
 function guardarToken(t) { try { t ? localStorage.setItem('ac_token', t) : localStorage.removeItem('ac_token'); } catch (e) {} }
 
 function aviso(texto) {
@@ -297,7 +321,7 @@ function pintarAcceso() {
         <img class="logo-grande" src="iconos/logo-blanco.png" alt="Logo de Agua Casinera">
         <p class="antetitulo">Grupo de baile</p>
         <h1>Agua Casinera</h1>
-        <p style="position:relative;z-index:1;color:#d9d9de">Avisa si vas al ensayo, sin perderte en el chat.</p>
+        <p style="position:relative;z-index:1;color:color-mix(in srgb, var(--sobre-color) 82%, transparent)">Avisa si vas al ensayo, sin perderte en el chat.</p>
       </div>
       <form class="tarjeta" id="form-acceso" novalidate>
         <label class="campo" for="quien">¿Quién eres?</label>
@@ -1853,6 +1877,8 @@ function vistaPerfil() {
       <div class="acciones"><button class="boton" ${ocupado} onclick="guardarMiPerfil()">Guardar cambios</button></div>
     </section>
 
+    ${tarjetaApariencia()}
+
     ${tarjetaLicenciaPerfil(p)}
 
     <section class="tarjeta">
@@ -1934,6 +1960,19 @@ async function cambiarMiPin() {
     aviso('Listo: tu PIN cambió. Úsalo la próxima vez que entres.');
   } catch (e) { aviso(mensajeError(e)); }
   estado.ocupado = false; pintar();
+}
+
+/** Mi perfil → Apariencia: automático (como el teléfono), claro u oscuro. Se guarda en este celular. */
+function tarjetaApariencia() {
+  const pref = preferenciaTema();
+  const opcion = (v, ico, texto) => `<button class="chip" aria-pressed="${String(pref === v)}" onclick="elegirTema('${v}')">${icono(ico)}<span>${texto}</span></button>`;
+  return `<section class="tarjeta">
+      <h2>${icono(document.documentElement.dataset.theme === 'oscuro' ? 'luna' : 'sol')} Apariencia</h2>
+      <div class="apariencia" role="group" aria-label="Tema de la app">
+        ${opcion('auto', 'celular', 'Automático')}${opcion('claro', 'sol', 'Claro')}${opcion('oscuro', 'luna', 'Oscuro')}
+      </div>
+      <p class="sub" style="margin-top:8px">${pref === 'auto' ? 'Sigue el modo de tu teléfono.' : 'Se guarda en este celular.'}</p>
+    </section>`;
 }
 
 /* ============================================================

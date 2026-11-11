@@ -6,7 +6,7 @@
  * Cuando cambies algún archivo de la web, sube el número de VERSION
  * para que los celulares descarguen lo nuevo.
  */
-const VERSION = 'agua-1.21';
+const VERSION = 'agua-1.22';
 const ARCHIVOS = [
   './', 'index.html', 'estilos.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'iconos/icono-192.png', 'iconos/icono-512.png', 'iconos/favicon-32.png', 'iconos/logo-blanco.png'
