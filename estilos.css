@@ -154,6 +154,9 @@
   .vista-gestion.desde-derecha { animation: entra-desde-derecha .22s ease-out; }
   .vista-gestion.desde-izquierda { animation: entra-desde-izquierda .22s ease-out; }
   @media (prefers-reduced-motion: reduce) { .vista-gestion { animation: none !important; } }
+  /* v1.26 · Notificaciones */
+  .estado-push { display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--exito); margin: 0 0 4px; }
+  .invitar-push .acciones, #tarjeta-push .acciones { align-items: center; }
   .version-app { margin-top: 10px; font-size: .82rem; }
 
   /* ============ Tarjetas ============ */

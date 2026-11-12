@@ -1,5 +1,5 @@
 /*
- * Service worker: guarda la "cáscara" de la app (HTML, CSS, JS, íconos y fuentes)
+ * Service worker (v1.26: también recibe las notificaciones push, ver al final): guarda la "cáscara" de la app (HTML, CSS, JS, íconos y fuentes)
  * para que abra al instante y se pueda instalar.
  * Los datos (API de Apps Script) NUNCA se guardan aquí: siempre van a internet.
  *
@@ -11,11 +11,12 @@
  *
  * Cuando cambies algún archivo de la web, sube el número de VERSION.
  */
-const VERSION = 'agua-1.25';
+const VERSION = 'agua-1.26';
 const FUENTES = 'agua-fuentes';            // aparte: no se borra al cambiar de versión
 const ARCHIVOS = [
   './', 'index.html', 'estilos.css', 'app.js', 'config.js', 'manifest.webmanifest',
-  'iconos/icono-192.png', 'iconos/icono-512.png', 'iconos/favicon-32.png', 'iconos/logo-blanco.png'
+  'iconos/icono-192.png', 'iconos/icono-512.png', 'iconos/favicon-32.png', 'iconos/logo-blanco.png',
+  'iconos/insignia-96.png'
 ];
 
 self.addEventListener('install', evento => {
@@ -97,3 +98,43 @@ function sinCacheDelNavegador(resp) {
   cabeceras.set('Cache-Control', 'no-cache');
   return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: cabeceras });
 }
+
+/* ============================================================
+ * v1.26 · Notificaciones push (Firebase Cloud Messaging)
+ * El servidor manda mensajes "solo datos" ({ titulo, texto, ir }). Aquí se arma la notificación:
+ * así se ve igual en Android, iPhone y computadora, y no hace falta el service worker de Firebase.
+ * ============================================================ */
+self.addEventListener('push', evento => {
+  let j = {};
+  try { j = evento.data ? evento.data.json() : {}; } catch (e) { j = { data: { texto: evento.data ? evento.data.text() : '' } }; }
+  const d = Object.assign({}, j.notification || {}, j.data || {});
+  const titulo = d.titulo || d.title || 'Agua Casinera';
+  const opciones = {
+    body: d.texto || d.body || '',
+    icon: 'iconos/icono-192.png',          // a color, al lado del texto
+    badge: 'iconos/insignia-96.png',       // Android: silueta blanca en la barra de arriba
+    lang: 'es',
+    data: { ir: d.ir || 'inicio' }
+  };
+  evento.waitUntil(Promise.all([
+    self.registration.showNotification(titulo, opciones),
+    // Si la app está abierta, que actualice la campana
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(lista => lista.forEach(c => c.postMessage({ tipo: 'push' })))
+  ]));
+});
+
+/** Tocar la notificación: si la app ya está abierta, la trae al frente en esa sección; si no, la abre ahí. */
+self.addEventListener('notificationclick', evento => {
+  evento.notification.close();
+  const ir = (evento.notification.data && evento.notification.data.ir) || 'inicio';
+  evento.waitUntil((async () => {
+    const lista = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const abierta = lista.find(c => new URL(c.url).origin === self.location.origin);
+    if (abierta) {
+      abierta.postMessage({ tipo: 'abrir', ir });
+      return abierta.focus();
+    }
+    return self.clients.openWindow(new URL('./?ir=' + encodeURIComponent(ir), self.registration.scope).href);
+  })());
+});

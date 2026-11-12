@@ -260,6 +260,7 @@ async function arrancar() {
     guardarCopia(estado.datos);
     pintar();
     precargar();
+    despuesDeCargar();
   } catch (e) {
     if (mensajeError(e).includes('SESION')) return cerrarSesion();
     if (copia) return aviso('Sin conexión: estás viendo la última información guardada.');
@@ -278,6 +279,9 @@ async function mostrarAcceso() {
 
 function cerrarSesion() {
   try { localStorage.removeItem('ac_copia'); } catch (e) {}
+  const fcm = leerLocal(PUSH_LOCAL);
+  if (fcm && estado.token) api('quitarPush', estado.token, fcm).catch(() => {});   // sin esperar: igual se cierra
+  ponerLocal(PUSH_LOCAL, null);
   estado.perfil = null; estado.perfilForm = null; estado.dir = null; estado.dirAbierto = null;
   guardarToken(null);
   estado.token = null; estado.menu = false; estado.vista = 'inicio';
@@ -353,6 +357,7 @@ function pintarAcceso() {
       estado.datos = datos; estado.errorAcceso = '';
       guardarCopia(datos); precargar();
       pintar();
+      despuesDeCargar();
     } catch (e) {
       estado.errorAcceso = mensajeError(e);
       pintarAcceso();
@@ -707,8 +712,169 @@ function tarjetaResumen(s) {
 
 function vistaInicio(d) {
   const conLicencia = d.miLicencia && d.miLicencia.cubreEnsayo;   // de licencia ese día: el plazo para avisar no aplica
-  return tarjetaCumpleHoy(d) + tarjetaEnsayo(d.ensayo) + tarjetaMiLicencia(d) + (conLicencia ? '' : bloquePlazo(d.ensayo)) + tarjetaRespuesta(d) +
+  return tarjetaCumpleHoy(d) + tarjetaEnsayo(d.ensayo) + tarjetaMiLicencia(d) + (conLicencia ? '' : bloquePlazo(d.ensayo)) + tarjetaRespuesta(d) + tarjetaInvitarPush() +
     (d.ensayo.estado === 'cancelado' ? '' : tarjetaResumen(d.resumen)) + tarjetaMiCuenta(d) + tarjetaMiAsistencia(d.miAsistencia);
+}
+
+/* ---------- v1.26 · Notificaciones push (Firebase Cloud Messaging) ----------
+ * Cómo funciona:
+ *  1. Al tocar "Activar", el navegador pide permiso. Si dice que sí, Firebase (push.js) le da a este celular
+ *     un "token": la dirección a la que Google le entrega mensajes. Lo mandamos al servidor (registrarPush).
+ *  2. Cada vez que el servidor crea un aviso de la campana (notificar_), también lo envía por FCM a los
+ *     celulares de esa persona. El service worker (sw.js) lo recibe y muestra la notificación, aunque la
+ *     app esté cerrada. Al tocarla, abre la app en la sección del aviso.
+ *  3. El token puede cambiar con el tiempo: al abrir la app se revisa en silencio (renovarPush).
+ * push.js (Firebase, ~16 KB comprimido) se carga recién cuando hace falta, no al abrir la app. */
+const PUSH_LOCAL = 'ac_push';            // token de este celular, si se activaron aquí
+const PUSH_SYNC = 'ac_push_sync';        // cuándo se le confirmó al servidor por última vez
+const PUSH_NO = 'ac_push_no';            // "Ahora no" en Inicio (no se vuelve a ofrecer en 30 días)
+function leerLocal(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function ponerLocal(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+
+/** activo | apagado | bloqueado | ios-instalar | no-soportado | sin-configurar */
+function estadoPush() {
+  if (!CONFIG.FIREBASE || !CONFIG.VAPID) return 'sin-configurar';
+  if (!('serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window)) {
+    return esIOS && !yaInstalada() ? 'ios-instalar' : 'no-soportado';      // en iPhone solo con la app instalada
+  }
+  if (Notification.permission === 'denied') return 'bloqueado';
+  return Notification.permission === 'granted' && leerLocal(PUSH_LOCAL) ? 'activo' : 'apagado';
+}
+
+/** "Android · Chrome · app": para que en la Sheet se sepa qué celular es (sin datos personales). */
+function plataforma() {
+  const u = navigator.userAgent;
+  const so = /Android/.test(u) ? 'Android' : esIOS ? 'iPhone' : /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'Otro';
+  const nav = /Edg\//.test(u) ? 'Edge' : /SamsungBrowser/.test(u) ? 'Samsung' : /Firefox|FxiOS/.test(u) ? 'Firefox'
+    : /Chrome|CriOS/.test(u) ? 'Chrome' : /Safari/.test(u) ? 'Safari' : '';
+  return [so, nav, yaInstalada() ? 'app' : ''].filter(Boolean).join(' · ');
+}
+
+let moduloPush = null;
+function cargarPush() {
+  if (window.__pushPrueba) return Promise.resolve(window.__pushPrueba);       // las pruebas automáticas lo reemplazan
+  return moduloPush || (moduloPush = import('./push.js?v=' + CONFIG.VERSION).catch(e => { moduloPush = null; throw e; }));
+}
+async function tokenPush() {
+  const m = await cargarPush();
+  const registro = await navigator.serviceWorker.ready;     // nuestro sw.js recibe los mensajes (no el de Firebase)
+  return m.pedirToken(CONFIG.FIREBASE, CONFIG.VAPID, registro);
+}
+
+async function activarPush() {
+  if (estado.ocupado) return;
+  // El permiso se pide PRIMERO y directo desde el toque: Safari no lo muestra si antes hubo otra espera
+  let permiso;
+  try { permiso = await Notification.requestPermission(); } catch (e) { permiso = Notification.permission; }
+  if (permiso !== 'granted') {
+    pintar();
+    return aviso(permiso === 'denied' ? 'Quedaron bloqueadas. En Perfil › Notificaciones te explico cómo permitirlas.' : 'No se activaron. Puedes hacerlo cuando quieras desde Perfil.');
+  }
+  estado.ocupado = true; pintar();
+  try {
+    const fcm = await tokenPush();
+    await api('registrarPush', estado.token, fcm, plataforma());
+    ponerLocal(PUSH_LOCAL, fcm); ponerLocal(PUSH_SYNC, String(Date.now())); ponerLocal(PUSH_NO, null);
+    aviso('Listo: los avisos te llegarán a este celular.');
+  } catch (e) {
+    const t = String((e && e.message) || e);
+    aviso('No se pudieron activar: ' + (/permission|denied|NotAllowed/i.test(t) ? 'el celular no lo permitió. Revisa el permiso de notificaciones.'
+      : /network|fetch|Failed to|offline|installations/i.test(t) ? 'no hubo conexión con Google. Inténtalo de nuevo.' : mensajeError(e)));
+  } finally { estado.ocupado = false; pintar(); }
+}
+
+async function desactivarPush() {
+  if (estado.ocupado) return;
+  const fcm = leerLocal(PUSH_LOCAL);
+  estado.ocupado = true; pintar();
+  try {
+    if (fcm) await api('quitarPush', estado.token, fcm);
+    const m = await cargarPush().catch(() => null);
+    if (m) await m.borrarToken(CONFIG.FIREBASE);
+    ponerLocal(PUSH_LOCAL, null);
+    aviso('Notificaciones apagadas en este celular.');
+  } catch (e) {
+    aviso('No se pudieron apagar: ' + mensajeError(e));
+  } finally { estado.ocupado = false; pintar(); }
+}
+
+async function probarMiPush() {
+  if (estado.ocupado) return;
+  estado.ocupado = true; pintar();
+  try {
+    const r = await api('probarPush', estado.token);
+    aviso(r.enviados ? 'Prueba enviada: debería llegar en unos segundos.'
+      : r.sinConfigurar ? 'El servidor todavía no tiene la clave de Firebase (Propiedades del script).'
+      : r.sinDispositivos ? 'Este celular no figura como activo: apaga y vuelve a activar.'
+      : 'Google no la aceptó. Apaga y vuelve a activar; si sigue, avísale a la directiva.');
+  } catch (e) {
+    aviso('No se pudo enviar la prueba: ' + mensajeError(e));
+  } finally { estado.ocupado = false; pintar(); }
+}
+
+/** Al abrir: si ya estaban activadas, confirma en silencio que el token sigue igual (y cada 7 días, que sigue vivo). */
+async function renovarPush() {
+  if (!estado.token || estadoPush() !== 'activo') return;
+  try {
+    const fcm = await tokenPush();
+    if (fcm !== leerLocal(PUSH_LOCAL) || Date.now() - Number(leerLocal(PUSH_SYNC) || 0) > 7 * 864e5) {
+      await api('registrarPush', estado.token, fcm, plataforma());
+      ponerLocal(PUSH_LOCAL, fcm); ponerLocal(PUSH_SYNC, String(Date.now()));
+    }
+  } catch (e) { /* sin señal: se intenta la próxima vez */ }
+}
+
+/** Después de cargar Inicio: abrir la sección de una notificación tocada (?ir=…) y renovar el token sin apuro. */
+function despuesDeCargar() {
+  const ir = new URLSearchParams(location.search).get('ir');
+  if (ir) {
+    history.replaceState(null, '', location.pathname);
+    if (DESTINO[ir]) irDesdeAviso(ir);
+  }
+  setTimeout(renovarPush, 4000);
+}
+
+/** El service worker avisa: tocaron una notificación con la app abierta, o llegó una (actualizar la campana). */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', ev => {
+    const m = ev.data || {};
+    if (!estado.token || !estado.datos) return;
+    if (m.tipo === 'abrir' && DESTINO[m.ir]) irDesdeAviso(m.ir);
+    else if (m.tipo === 'push') refrescarInicio();
+  });
+}
+
+function tarjetaNotificaciones() {
+  const e = estadoPush(), oc = estado.ocupado ? 'disabled' : '';
+  if (e === 'sin-configurar') return '';
+  const cuerpo = {
+    activo: `<p class="estado-push">${icono('check')} Activadas en este celular</p>
+      <p class="sub">Te llegan los mismos avisos de la campana: licencias, pagos y el recordatorio del plazo, aunque la app esté cerrada.</p>
+      <div class="acciones"><button class="boton secundario" ${oc} onclick="probarMiPush()">Enviarme una prueba</button>
+        <button class="enlace" ${oc} onclick="desactivarPush()">Apagar en este celular</button></div>`,
+    apagado: `<p class="sub">Recibe en este celular los avisos de la campana (licencias, pagos y el recordatorio del plazo), aunque tengas la app cerrada.</p>
+      <div class="acciones"><button class="boton" ${oc} onclick="activarPush()">${icono('campana')} Activar notificaciones</button></div>`,
+    bloqueado: `<p class="sub">Las notificaciones están bloqueadas para esta app. Para permitirlas:</p>
+      <p class="sub">${esIOS ? 'Ajustes del iPhone › Notificaciones › Agua Casinera › Permitir notificaciones.'
+        : yaInstalada() ? 'Mantén presionado el ícono de la app › Información de la app › Notificaciones › Permitir.'
+        : 'Toca el ícono junto a la dirección (arriba) › Permisos o Configuración del sitio › Notificaciones › Permitir.'} Luego vuelve aquí y actívalas.</p>`,
+    'ios-instalar': `<p class="sub">En iPhone, las notificaciones funcionan solo con la app instalada: en Safari toca Compartir › "Agregar a inicio" y ábrela desde ese ícono.</p>`,
+    'no-soportado': `<p class="sub">Este navegador no permite notificaciones. En Android usa Chrome; en iPhone, Safari con la app instalada.</p>`
+  }[e];
+  return `<section class="tarjeta" id="tarjeta-push"><h2>${icono('campana')} Notificaciones</h2>${cuerpo}</section>`;
+}
+
+/** En Inicio, una sola vez (y otra en 30 días si dijo "Ahora no"): invitación a activar. */
+function tarjetaInvitarPush() {
+  if (estadoPush() !== 'apagado') return '';
+  if (Date.now() - Number(leerLocal(PUSH_NO) || 0) < 30 * 864e5) return '';
+  const oc = estado.ocupado ? 'disabled' : '';
+  return `<section class="tarjeta invitar-push">
+      <h2>${icono('campana')} ¿Te avisamos al celular?</h2>
+      <p class="sub">Cuando aprueben tu licencia o confirmen tu pago, y antes de que cierre el plazo del viernes.</p>
+      <div class="acciones"><button class="boton" ${oc} onclick="activarPush()">Activar</button>
+        <button class="enlace" onclick="ponerLocal(PUSH_NO, String(Date.now())); pintar()">Ahora no</button></div>
+    </section>`;
 }
 
 /** Cambia de pestaña. La lista y el resumen se piden recién la primera vez que se abren. */
@@ -2015,6 +2181,7 @@ function vistaPerfil() {
       <div class="acciones"><button class="boton" ${ocupado} onclick="guardarMiPerfil()">Guardar cambios</button></div>
     </section>
 
+    ${tarjetaNotificaciones()}
     ${tarjetaApariencia()}
 
     ${tarjetaLicenciaPerfil(p)}
