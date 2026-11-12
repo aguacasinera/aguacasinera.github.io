@@ -11,7 +11,7 @@
 const estado = {
   token: leerToken(),
   datos: null,        // lo que devuelve inicio() en Codigo.gs
-  vista: 'inicio',    // 'inicio' | 'directiva'
+  vista: 'inicio',    // 'inicio' | 'grupo' | 'lista' | 'tesoreria' | 'directiva' | 'perfil' | 'avisos'
   editando: null,     // null | 'elegir' | 'llego_tarde' | 'no_voy'
   motivo: '',
   hora: '',           // "18:30" mientras se llena "Llego tarde"
@@ -102,7 +102,9 @@ const ICONOS = {
   der: '<path d="m9 18 6-6-6-6"/>',
   candado: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   billetera: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
-  descargar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'
+  descargar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  escudo: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  gestion: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>'
 };
 function icono(nombre) {
   return '<svg class="icono" viewBox="0 0 24 24" aria-hidden="true">' + ICONOS[nombre] + '</svg>';
@@ -371,36 +373,23 @@ function pintar() {
   const activo = document.activeElement;
   const campo = activo && activo.id && /^(INPUT|TEXTAREA|SELECT)$/.test(activo.tagName)
     ? { id: activo.id, ini: activo.selectionStart, fin: activo.selectionEnd } : null;
-  const permisos = d.permisos || { lista: false, directiva: !!d.admin };
-  const pestanas = [['inicio', 'Inicio'], ['grupo', 'Grupo']];
-  if (permisos.lista) pestanas.push(['lista', 'Lista']);
-  if (permisos.tesoreria) pestanas.push(['tesoreria', 'Tesorería']);
-  if (permisos.directiva && d.admin) pestanas.push(['directiva', 'Directiva']);
-  if (!pestanas.some(p => p[0] === estado.vista) && !['perfil', 'avisos'].includes(estado.vista)) estado.vista = 'inicio';
-  const rolTexto = d.yo.rol === 'admin' ? 'Directiva'
-    : [permisos.lista ? 'Talleres' : '', permisos.tesoreria ? 'Tesorería' : ''].filter(Boolean).join(' · ') || 'Miembro';
+  const partes = partesGestion(d);
+  const validas = ['inicio', 'grupo', 'perfil', 'avisos', ...partes.map(p => p[0])];
+  if (!validas.includes(estado.vista)) estado.vista = 'inicio';
+  const enGestion = GESTION.includes(estado.vista);
+  const pend = pendientesGestion(d, partes);
+  const totalPend = partes.reduce((a, [id]) => a + pend[id], 0);
 
   document.getElementById('app').innerHTML = `
     <header class="barra">
       <div class="marca"><span class="logo"><img src="iconos/logo-blanco.png" alt=""></span>${esc(d.grupo)}</div>
       <button class="campana-btn" aria-label="Avisos${d.avisosNuevos ? ': ' + d.avisosNuevos + ' nuevos' : ''}" onclick="abrirAvisos()">
-        ${icono('campana')}${d.avisosNuevos ? `<span class="burbuja">${d.avisosNuevos > 9 ? '9+' : d.avisosNuevos}</span>` : ''}</button>
-      <button class="avatar" aria-label="Menú" aria-expanded="${String(estado.menu)}"
-              onclick="estado.menu=!estado.menu;pintar()">${avatar({ id: d.yo.id, nombre: d.yo.nombre, fotoV: d.yo.fotoV })}</button>
-      ${estado.menu ? `<div class="menu">
-          <p><strong>${esc(d.yo.nombre)}</strong>${rolTexto}${d.yo.nivel ? ` · ${insigniaNivel(d.yo.nivel)}` : ''}</p>
-          <button class="enlace" onclick="abrirPerfil()">${icono('usuario')} Mi perfil</button><br>
-          ${estado.instalar ? `<button class="enlace" onclick="instalarApp()">${icono('descargar')} Instalar app</button><br>` : ''}
-          <button class="enlace" onclick="cerrarSesion()">${icono('salir')} Cerrar sesión</button>
-          <p class="version">Versión ${esc(CONFIG.VERSION)}</p>
-        </div>` : ''}
+        ${icono('campana')}${d.avisosNuevos ? `<span class="burbuja">${cifra(d.avisosNuevos)}</span>` : ''}</button>
     </header>
-    ${pestanas.length > 1 ? `<nav class="pestanas ${pestanas.length > 3 ? 'muchas' : ''}" role="tablist">
-        ${pestanas.map(([id, texto]) => `<button role="tab" aria-selected="${String(estado.vista === id)}"
-            onclick="irA('${id}')">${texto}</button>`).join('')}
-      </nav>` : ''}
+    ${enGestion ? cabeceraGestion(partes, pend) : ''}
     ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'tesoreria' ? vistaTesoreria() : estado.vista === 'directiva' ? vistaDirectiva(d)
-      : estado.vista === 'grupo' ? vistaGrupo() : estado.vista === 'perfil' ? vistaPerfil() : estado.vista === 'avisos' ? vistaAvisos() : vistaInicio(d)}`;
+      : estado.vista === 'grupo' ? vistaGrupo() : estado.vista === 'perfil' ? vistaPerfil() : estado.vista === 'avisos' ? vistaAvisos() : vistaInicio(d)}
+    ${barraAbajo(d, partes, enGestion, totalPend)}`;
 
   if (estado.editando === 'llego_tarde' && !estado.hora) document.getElementById('hora')?.focus();
   const enfocar = estado.enfocar ? { id: estado.enfocar } : campo;
@@ -411,6 +400,71 @@ function pintar() {
     const n = el.value ? el.value.length : 0;
     try { el.setSelectionRange(enfocar.ini ?? n, enfocar.fin ?? n); } catch (e) { /* select, date: no tienen cursor */ }
   }
+}
+
+/* ---------- v1.24 · Navegación: barra de abajo (Inicio · Grupo · Gestión · Perfil) ---------- */
+const GESTION = ['lista', 'tesoreria', 'directiva'];
+const cifra = n => n > 9 ? '9+' : String(n);
+
+/** Las partes de Gestión que esta persona puede abrir: [id, texto, icono]. */
+function partesGestion(d) {
+  const p = d.permisos || { lista: false, directiva: !!d.admin };
+  const r = [];
+  if (p.lista) r.push(['lista', 'Lista', 'lista']);
+  if (p.tesoreria) r.push(['tesoreria', 'Tesorería', 'billetera']);
+  if (p.directiva && d.admin) r.push(['directiva', 'Directiva', 'escudo']);
+  return r;
+}
+
+/** Lo que espera una decisión en cada parte (para la burbuja de Gestión y el punto del selector). */
+function pendientesGestion(d, partes) {
+  const puede = id => partes.some(p => p[0] === id);
+  const t = estado.teso, lic = d.admin && d.admin.licencias;
+  return {
+    lista: 0,
+    tesoreria: puede('tesoreria') && t && t.porRevisar ? t.porRevisar.length : 0,
+    directiva: puede('directiva') && lic ? lic.pendientes.length : 0
+  };
+}
+
+/** Última parte de Gestión que abrió esta persona en este celular (la siguiente vez entra directo). */
+function ultimaGestion(partes) {
+  let u = null;
+  try { u = localStorage.getItem('ac_gestion'); } catch (e) {}
+  return partes.some(p => p[0] === u) ? u : partes[0][0];
+}
+function abrirGestion() {
+  if (GESTION.includes(estado.vista)) return window.scrollTo({ top: 0, behavior: 'smooth' });
+  irA(ultimaGestion(partesGestion(estado.datos)));
+}
+
+/** Título "Gestión" y, si hay más de una parte, el selector Lista / Tesorería / Directiva. */
+function cabeceraGestion(partes, pend) {
+  return `<div class="gestion-cabeza">
+      <h1 class="titulo-seccion">Gestión</h1>
+      ${partes.length > 1 ? `<div class="segmentos" role="group" aria-label="Partes de Gestión">
+        ${partes.map(([id, texto, ico]) => `<button ${estado.vista === id ? 'aria-current="page"' : ''}
+            aria-label="${texto}${pend[id] ? ', ' + pend[id] + ' por revisar' : ''}" onclick="irA('${id}')">
+            ${icono(ico)}<span>${texto}</span>${pend[id] ? '<span class="punto" aria-hidden="true"></span>' : ''}</button>`).join('')}
+      </div>` : ''}
+    </div>`;
+}
+
+/** Barra fija de abajo. El integrante sin áreas ve Inicio · Grupo · Perfil. */
+function barraAbajo(d, partes, enGestion, totalPend) {
+  const boton = (activo, texto, dentro, accion, extra = '') => `
+    <button ${activo ? 'aria-current="page"' : ''} onclick="${accion}" ${extra}>
+      <span class="pildora">${dentro}</span><span class="nav-texto">${texto}</span></button>`;
+  const v = estado.vista;
+  return `<div class="relleno-nav" aria-hidden="true"></div>
+    <nav class="nav-abajo" aria-label="Secciones">
+      ${boton(v === 'inicio', 'Inicio', icono('olas'), "irA('inicio')")}
+      ${boton(v === 'grupo', 'Grupo', icono('personas'), "irA('grupo')")}
+      ${partes.length ? boton(enGestion, 'Gestión',
+          icono('gestion') + (totalPend ? `<span class="burbuja">${cifra(totalPend)}</span>` : ''), 'abrirGestion()',
+          totalPend ? `aria-label="Gestión, ${totalPend} por revisar"` : '') : ''}
+      ${boton(v === 'perfil', 'Perfil', avatar({ id: d.yo.id, nombre: d.yo.nombre, fotoV: d.yo.fotoV }, 'mini'), 'abrirPerfil()')}
+    </nav>`;
 }
 
 function tarjetaEnsayo(e) {
@@ -602,9 +656,13 @@ function vistaInicio(d) {
 
 /** Cambia de pestaña. La lista y el resumen se piden recién la primera vez que se abren. */
 async function irA(vista) {
+  if (vista === 'perfil') return abrirPerfil();
   if (estado.vista === 'lista' && vista !== 'lista') await guardarCambios();
+  const cambia = estado.vista !== vista;
   estado.vista = vista; estado.menu = false;
+  if (GESTION.includes(vista)) { try { localStorage.setItem('ac_gestion', vista); } catch (e) {} }
   pintar();
+  if (cambia) window.scrollTo(0, 0);
   if (vista === 'grupo') cargarDirectorio();
   if (vista === 'lista' && !estado.lista) { cargarLista(); cargarResumen(); }
   if (vista === 'tesoreria') cargarTesoreria();
@@ -1834,6 +1892,9 @@ async function quitarFotoDe(id) {
 
 /* ---- Mi perfil ---- */
 async function abrirPerfil() {
+  // Ya estás en Perfil: sube al inicio sin borrar lo que estabas escribiendo
+  if (estado.vista === 'perfil' && estado.perfilForm) return window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (estado.vista === 'lista') await guardarCambios();
   estado.menu = false; estado.vista = 'perfil';
   if (!estado.perfil) {
     pintar();
@@ -1857,7 +1918,6 @@ function vistaPerfil() {
   const rol = yo.rol === 'admin' ? 'Directiva' : (p.areas || 'Integrante');
   const dias = n => Array.from({ length: n }, (_, i) => i + 1);
   return `
-    <button class="enlace volver" onclick="irA('inicio')">← Volver</button>
     <section class="tarjeta perfil">
       <div class="perfil-cabeza">
         <label class="foto-perfil" for="foto-input" title="Cambiar foto">
@@ -1911,6 +1971,13 @@ function vistaPerfil() {
           <input type="password" id="pin-repite" inputmode="numeric" maxlength="4" autocomplete="new-password" value="${esc(f.pinRepite)}" oninput="estado.perfilForm.pinRepite=this.value"></div>
       </div>
       <div class="acciones"><button class="boton secundario" ${ocupado} onclick="cambiarMiPin()">Cambiar PIN</button></div>
+    </section>
+
+    <section class="tarjeta">
+      <h2>${icono('celular')} Esta app</h2>
+      ${estado.instalar ? `<button class="enlace" onclick="instalarApp()">${icono('descargar')} Instalar en este celular</button><br>` : ''}
+      <button class="enlace" onclick="cerrarSesion()">${icono('salir')} Cerrar sesión</button>
+      <p class="sub version-app">Versión ${esc(CONFIG.VERSION)}</p>
     </section>`;
 }
 
@@ -2111,7 +2178,7 @@ function haceCuanto(iso) {
   if (min < 48 * 60) return 'ayer';
   return cuando(iso);
 }
-const DESTINO = { inicio: 'Inicio', grupo: 'Grupo', perfil: 'Mi perfil', tesoreria: 'Tesorería', directiva: 'Directiva', lista: 'Lista' };
+const DESTINO = { inicio: 'Inicio', grupo: 'Grupo', perfil: 'Mi perfil', tesoreria: 'Gestión › Tesorería', directiva: 'Gestión › Directiva', lista: 'Gestión › Lista' };
 function irDesdeAviso(destino) {
   if (destino === 'perfil') return abrirPerfil();
   irA(destino);

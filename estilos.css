@@ -107,18 +107,45 @@
   .marca .logo { width: 38px; height: 38px; border-radius: 10px; background: var(--negro);
                  display: grid; place-items: center; }
   .marca .logo img { width: 28px; height: auto; display: block; }
-  .avatar { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--borde); background: var(--superficie);
-            font-weight: 700; cursor: pointer; }
-  .menu { position: absolute; right: 0; top: 60px; z-index: 5; background: var(--superficie); border: 1px solid var(--borde);
-          border-radius: 12px; box-shadow: var(--sombra); padding: 8px; min-width: 200px; }
-  .menu p { padding: 6px 10px 10px; color: var(--tinta-2); font-size: .9rem; border-bottom: 1px solid var(--borde); margin-bottom: 6px; }
-  .menu p strong { display: block; color: var(--tinta); }
 
-  /* ============ Pestañas ============ */
-  .pestanas { display: flex; background: var(--pestanas-fondo); border-radius: 12px; padding: 4px; margin-bottom: 16px; }
-  .pestanas button { flex: 1; border: 0; background: transparent; padding: 9px; border-radius: 9px;
-                     font-weight: 700; color: var(--tinta-2); cursor: pointer; }
-  .pestanas button[aria-selected="true"] { background: var(--pestana-activa); color: var(--tinta); box-shadow: var(--sombra); }
+  /* ============ v1.24 · Navegación ============ */
+  /* Barra fija de abajo: Inicio · Grupo · Gestión · Perfil. Azul = selección (sistema de diseño). */
+  .nav-abajo { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; display: flex; justify-content: center;
+    background: var(--superficie); border-top: 1px solid var(--borde);
+    padding: 6px max(6px, env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-right)); }
+  .nav-abajo button { flex: 1; max-width: 130px; min-height: 54px; border: 0; background: none; cursor: pointer; padding: 4px 0;
+    display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--tinta-2); font: 700 .72rem var(--texto);
+    -webkit-tap-highlight-color: transparent; }
+  .nav-abajo .pildora { position: relative; width: 58px; height: 30px; border-radius: 999px; display: grid; place-items: center;
+    transition: background-color .15s; }
+  .nav-abajo .pildora > svg { width: 22px; height: 22px; }
+  .nav-abajo button[aria-current="page"] { color: var(--azul-texto); }
+  .nav-abajo button[aria-current="page"] .pildora { background: var(--azul-suave); }
+  .nav-abajo button:focus-visible { outline: none; }
+  .nav-abajo button:focus-visible .pildora { box-shadow: 0 0 0 2px var(--azul); }
+  .nav-abajo .burbuja { top: -3px; right: 8px; border-color: var(--superficie); }
+  .nav-abajo .av.mini { width: 26px; height: 26px; font-size: .68rem; }
+  .nav-abajo button[aria-current="page"] .av.mini { box-shadow: 0 0 0 2px var(--azul-texto); }
+  /* Espacio al final de cada pantalla para que la barra no tape lo último */
+  .relleno-nav { height: calc(76px + env(safe-area-inset-bottom)); }
+  /* Con el teclado abierto la barra estorba: se esconde mientras se escribe */
+  body:has(:is(input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea):focus) .nav-abajo { display: none; }
+  /* Los avisos flotantes salen encima de la barra */
+  body:has(.nav-abajo) .toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
+
+  /* Gestión: título y selector Lista / Tesorería / Directiva */
+  .gestion-cabeza { margin: 2px 0 14px; }
+  .titulo-seccion { font-size: 1.6rem; margin: 0 0 12px; }
+  .segmentos { display: flex; background: var(--pestanas-fondo); border-radius: 12px; padding: 4px; }
+  .segmentos button { flex: 1; min-width: 0; min-height: 42px; border: 0; background: transparent; border-radius: 9px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 4px;
+    font: 700 .9rem var(--texto); color: var(--tinta-2); }
+  .segmentos button svg { width: 17px; height: 17px; flex: none; }
+  .segmentos button span:not(.punto) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .segmentos button[aria-current="page"] { background: var(--pestana-activa); color: var(--tinta); box-shadow: var(--sombra); }
+  .segmentos .punto { width: 7px; height: 7px; border-radius: 50%; background: var(--primario); flex: none; }
+  @media (max-width: 360px) { .segmentos button svg { display: none; } }
+  .version-app { margin-top: 10px; font-size: .82rem; }
 
   /* ============ Tarjetas ============ */
   .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
@@ -260,7 +287,6 @@
   .instalar { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
   .instalar strong { display: block; }
   .instalar .sub { display: block; }
-  .version { border: 0 !important; margin: 6px 0 0 !important; padding: 6px 10px 0 !important; font-size: .8rem !important; }
   body { padding-top: env(safe-area-inset-top); }
 
   /* ============ Fase 2 · Mi asistencia ============ */
@@ -353,7 +379,6 @@
   .multa-texto { color: var(--error-texto); }
 
   /* ============ v1.9 · Mi cuenta y Tesorería ============ */
-  .pestanas.muchas button { font-size: .86rem; padding: 9px 2px; }
   .saldo { font-size: 1.05rem; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .saldo b { font-family: var(--titulos); font-size: 1.6rem; }
   .saldo.debe b { color: var(--error-texto); }
@@ -480,9 +505,7 @@
   .av.sin-foto { background: hsl(var(--tono) 55% 88%); color: hsl(var(--tono) 45% 28%); font-weight: 700; font-size: .95rem; letter-spacing: .02em; }
   .av.chico { width: 36px; height: 36px; font-size: .8rem; }
   .av.grande { width: 96px; height: 96px; font-size: 2rem; }
-  .avatar { padding: 0; overflow: hidden; }
-  .avatar .av { width: 100%; height: 100%; font-size: .85rem; }
-  .menu .enlace svg, .volver svg { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; }
+  .volver svg { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; }
 
   .nivel { display: inline-block; font-size: .72rem; font-weight: 800; letter-spacing: .03em; border-radius: 999px; padding: 2px 8px;
     background: var(--carbon-suave); color: var(--carbon-texto); flex: none; }
@@ -534,7 +557,7 @@
   .en-linea select { width: auto; flex: 1; }
 
   /* ============ v1.21 · Licencias y avisos ============ */
-  .campana-btn { margin-left: auto; margin-right: 8px; position: relative; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--borde);
+  .campana-btn { margin-left: auto; position: relative; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--borde);
     background: var(--superficie); display: grid; place-items: center; cursor: pointer; color: var(--tinta); padding: 0; }
   .campana-btn svg { width: 19px; height: 19px; }
   .burbuja { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
@@ -565,8 +588,6 @@
   /* ============ v1.22 · Tema oscuro: lo que no resuelven los tokens ============ */
   /* La tarjeta del ensayo sigue en negro; en oscuro lleva un filo para no fundirse con el fondo */
   [data-theme="oscuro"] .ensayo { border: 1px solid var(--borde); }
-  /* La elevación se nota por el tono de la superficie: la tarjeta activa y el menú un paso más claros */
-  [data-theme="oscuro"] .menu { background: var(--pestana-activa); }
   [data-theme="oscuro"] img.av { outline: 1px solid var(--borde); }
   .apariencia { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
   .apariencia .chip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; border-radius: 12px; }
