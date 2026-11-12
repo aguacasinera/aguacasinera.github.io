@@ -82,7 +82,7 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--fondo); color: var(--tinta); }
-  body { font: 16px/1.5 var(--texto); -webkit-font-smoothing: antialiased; }
+  body { font: 16px/1.5 var(--texto); -webkit-font-smoothing: antialiased; overflow-x: clip; }
   #app { max-width: 520px; margin: 0 auto; padding: 0 16px 48px; }
   h1, h2, h3 { font-family: var(--titulos); line-height: 1.15; margin: 0; }
   h2 { font-size: 1.15rem; }
@@ -124,6 +124,9 @@
   .nav-abajo button:focus-visible { outline: none; }
   .nav-abajo button:focus-visible .pildora { box-shadow: 0 0 0 2px var(--azul); }
   .nav-abajo .burbuja { top: -3px; right: 8px; border-color: var(--superficie); }
+  /* v1.25 · Punto (sin número) cuando falta tu respuesta y el plazo vence pronto */
+  .nav-abajo .punto-nav { position: absolute; top: 1px; right: 14px; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--primario); border: 2px solid var(--superficie); }
   .nav-abajo .av.mini { width: 26px; height: 26px; font-size: .68rem; }
   .nav-abajo button[aria-current="page"] .av.mini { box-shadow: 0 0 0 2px var(--azul-texto); }
   /* Espacio al final de cada pantalla para que la barra no tape lo último */
@@ -145,6 +148,12 @@
   .segmentos button[aria-current="page"] { background: var(--pestana-activa); color: var(--tinta); box-shadow: var(--sombra); }
   .segmentos .punto { width: 7px; height: 7px; border-radius: 50%; background: var(--primario); flex: none; }
   @media (max-width: 360px) { .segmentos button svg { display: none; } }
+  /* v1.25 · Al cambiar de parte (tocando o deslizando), entra desde el lado correspondiente */
+  @keyframes entra-desde-derecha { from { opacity: .35; transform: translateX(32px); } to { opacity: 1; transform: none; } }
+  @keyframes entra-desde-izquierda { from { opacity: .35; transform: translateX(-32px); } to { opacity: 1; transform: none; } }
+  .vista-gestion.desde-derecha { animation: entra-desde-derecha .22s ease-out; }
+  .vista-gestion.desde-izquierda { animation: entra-desde-izquierda .22s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .vista-gestion { animation: none !important; } }
   .version-app { margin-top: 10px; font-size: .82rem; }
 
   /* ============ Tarjetas ============ */
@@ -526,6 +535,8 @@
   .cumples li:first-child { border-top: 0; }
   .cumples li span { color: var(--tinta-2); text-align: right; }
   .cumples li.hoy span { color: var(--ambar); font-weight: 700; }
+  .cumples li.hoy .insignia { background: var(--sol-suave); color: var(--sol-texto); align-self: center; }
+  .cumple-titulo svg { color: var(--primario-texto); vertical-align: -.15em; }
 
   .buscador { display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--borde); border-radius: 12px; padding: 0 12px; background: var(--superficie); margin-top: 6px; }
   .buscador svg { width: 18px; height: 18px; color: var(--tinta-2); flex: none; }

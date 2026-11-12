@@ -387,8 +387,10 @@ function pintar() {
         ${icono('campana')}${d.avisosNuevos ? `<span class="burbuja">${cifra(d.avisosNuevos)}</span>` : ''}</button>
     </header>
     ${enGestion ? cabeceraGestion(partes, pend) : ''}
+    ${enGestion ? `<div class="vista-gestion ${entradaGestion()}">` : ''}
     ${estado.vista === 'lista' ? vistaLista() : estado.vista === 'tesoreria' ? vistaTesoreria() : estado.vista === 'directiva' ? vistaDirectiva(d)
       : estado.vista === 'grupo' ? vistaGrupo() : estado.vista === 'perfil' ? vistaPerfil() : estado.vista === 'avisos' ? vistaAvisos() : vistaInicio(d)}
+    ${enGestion ? '</div>' : ''}
     ${barraAbajo(d, partes, enGestion, totalPend)}`;
 
   if (estado.editando === 'llego_tarde' && !estado.hora) document.getElementById('hora')?.focus();
@@ -438,6 +440,47 @@ function abrirGestion() {
   irA(ultimaGestion(partesGestion(estado.datos)));
 }
 
+/* v1.25 · Deslizar el dedo a los lados dentro de Gestión cambia de parte (Lista ⇄ Tesorería ⇄ Directiva).
+ * No se activa: cerca de los bordes (ahí está el gesto "atrás" del celular), sobre campos de texto,
+ * sobre algo que se desplaza de costado (el cuadro de cuotas), si el gesto es más vertical que horizontal,
+ * si es lento (más de 0,7 s) o corto (menos de 70 px), ni mientras se guarda algo. No da la vuelta: en Lista
+ * deslizar hacia la derecha no hace nada. */
+/** Clase de la animación de entrada. Dura 220 ms: si en ese rato se repinta (por ejemplo, llegan los datos),
+ *  sigue donde iba con un retraso negativo en vez de empezar de nuevo; después ya no se aplica. */
+function entradaGestion() {
+  const e = estado.entrada, pasado = e ? Date.now() - e.desde : 1e9;
+  if (pasado >= 220) { estado.entrada = null; return ''; }
+  return `${e.lado}" style="animation-delay:-${pasado}ms`;
+}
+
+let toque = null;
+function seDesplazaDeCostado(el) {
+  for (; el && el !== document.body; el = el.parentElement) {
+    if (el.scrollWidth > el.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(el).overflowX)) return true;
+  }
+  return false;
+}
+document.addEventListener('touchstart', ev => {
+  toque = null;
+  if (!estado.datos || !GESTION.includes(estado.vista) || estado.ocupado || ev.touches.length !== 1) return;
+  const t = ev.touches[0];
+  if (t.clientX < 24 || t.clientX > window.innerWidth - 24) return;
+  if (ev.target.closest('input, textarea, select, .nav-abajo, .segmentos') || seDesplazaDeCostado(ev.target)) return;
+  toque = { x: t.clientX, y: t.clientY, t: Date.now() };
+}, { passive: true });
+document.addEventListener('touchend', ev => {
+  if (!toque) return;
+  const t = ev.changedTouches[0], dx = t.clientX - toque.x, dy = t.clientY - toque.y, dt = Date.now() - toque.t;
+  toque = null;
+  if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || dt > 700) return;
+  if (String(window.getSelection ? window.getSelection() : '').length) return;   // estaba seleccionando texto
+  const partes = partesGestion(estado.datos);
+  const i = partes.findIndex(p => p[0] === estado.vista), j = i + (dx < 0 ? 1 : -1);
+  if (i < 0 || j < 0 || j >= partes.length) return;
+  irA(partes[j][0]);
+}, { passive: true });
+document.addEventListener('touchcancel', () => { toque = null; }, { passive: true });
+
 /** Título "Gestión" y, si hay más de una parte, el selector Lista / Tesorería / Directiva. */
 function cabeceraGestion(partes, pend) {
   return `<div class="gestion-cabeza">
@@ -450,6 +493,19 @@ function cabeceraGestion(partes, pend) {
     </div>`;
 }
 
+/** v1.25 · ¿Falta mi respuesta y el plazo vence pronto? (punto rojo en Inicio)
+ *  Solo si: hay ensayo, no está cancelado, el plazo sigue abierto, no estoy de licencia,
+ *  no respondí todavía y faltan 48 horas o menos para el cierre (normalmente desde el miércoles 11:59 p. m.). */
+const HORAS_AVISO_INICIO = 48;
+function faltaMiRespuesta(d) {
+  const e = d.ensayo;
+  if (!e || e.estado === 'cancelado' || e.cerrado || e.empezo) return false;
+  if (d.miLicencia && d.miLicencia.cubreEnsayo) return false;
+  if (d.miRespuesta && d.miRespuesta.respuesta) return false;
+  const falta = new Date(e.cierreISO) - Date.now();
+  return falta > 0 && falta <= HORAS_AVISO_INICIO * 3600 * 1000;
+}
+
 /** Barra fija de abajo. El integrante sin áreas ve Inicio · Grupo · Perfil. */
 function barraAbajo(d, partes, enGestion, totalPend) {
   const boton = (activo, texto, dentro, accion, extra = '') => `
@@ -458,7 +514,8 @@ function barraAbajo(d, partes, enGestion, totalPend) {
   const v = estado.vista;
   return `<div class="relleno-nav" aria-hidden="true"></div>
     <nav class="nav-abajo" aria-label="Secciones">
-      ${boton(v === 'inicio', 'Inicio', icono('olas'), "irA('inicio')")}
+      ${boton(v === 'inicio', 'Inicio', icono('olas') + (faltaMiRespuesta(d) ? '<span class="punto-nav"></span>' : ''), "irA('inicio')",
+          faltaMiRespuesta(d) ? 'aria-label="Inicio, falta tu respuesta para el ensayo"' : '')}
       ${boton(v === 'grupo', 'Grupo', icono('personas'), "irA('grupo')")}
       ${partes.length ? boton(enGestion, 'Gestión',
           icono('gestion') + (totalPend ? `<span class="burbuja">${cifra(totalPend)}</span>` : ''), 'abrirGestion()',
@@ -659,6 +716,9 @@ async function irA(vista) {
   if (vista === 'perfil') return abrirPerfil();
   if (estado.vista === 'lista' && vista !== 'lista') await guardarCambios();
   const cambia = estado.vista !== vista;
+  // v1.25 · Entre partes de Gestión, la nueva entra desde el lado hacia el que te moviste
+  if (cambia && GESTION.includes(vista) && GESTION.includes(estado.vista))
+    estado.entrada = { lado: GESTION.indexOf(vista) > GESTION.indexOf(estado.vista) ? 'desde-derecha' : 'desde-izquierda', desde: Date.now() };
   estado.vista = vista; estado.menu = false;
   if (GESTION.includes(vista)) { try { localStorage.setItem('ac_gestion', vista); } catch (e) {} }
   pintar();
@@ -1803,7 +1863,7 @@ function tarjetaCumpleHoy(d) {
   const llamado = x => x.apodo || primerNombre(x.nombre);
   const saludo = x => `¡Feliz cumpleaños, ${llamado(x)}! 🎉 Que la pases bonito. Un abrazo de ${primerNombre(d.yo.nombre)} · Agua Casinera`;
   return `<section class="tarjeta cumple-hoy">
-      ${yoCumplo ? `<p class="cumple-titulo">🎉 ¡Feliz cumpleaños, ${esc(d.yo.apodo || primerNombre(d.yo.nombre))}!</p>
+      ${yoCumplo ? `<p class="cumple-titulo">${icono('pastel')} ¡Feliz cumpleaños, ${esc(d.yo.apodo || primerNombre(d.yo.nombre))}!</p>
         <p class="sub">Todo Agua Casinera te saluda hoy.</p>` : ''}
       ${otros.map(x => `<div class="cumple-fila">
           ${avatar({ id: x.id, nombre: x.nombre, fotoV: (estado.dir && (estado.dir.personas.find(p => p.id === x.id) || {}).fotoV) || '' }, 'chico')}
@@ -1827,7 +1887,7 @@ function vistaGrupo() {
   return `
     ${d.cumpleanos.hoy.length || prox.length ? `<section class="tarjeta">
       <h2>${icono('pastel')} Cumpleaños</h2>
-      <ul class="cumples">${d.cumpleanos.hoy.map(x => `<li class="hoy"><b>${esc(x.nombre)}</b><span>¡Hoy! 🎉</span></li>`).join('')}
+      <ul class="cumples">${d.cumpleanos.hoy.map(x => `<li class="hoy"><b>${esc(x.nombre)}</b><span class="insignia">¡Hoy!</span></li>`).join('')}
         ${prox.map(x => `<li><b>${esc(x.nombre)}</b><span>${esc(x.texto)} · ${x.faltan === 1 ? 'mañana' : `en ${x.faltan} días`}</span></li>`).join('')}</ul>
     </section>` : ''}
     <section class="tarjeta">
@@ -2184,6 +2244,9 @@ function irDesdeAviso(destino) {
   irA(destino);
   if (destino === 'directiva') setTimeout(() => document.getElementById('licencias-admin')?.scrollIntoView({ behavior: 'smooth' }), 50);
 }
+/** La interfaz no lleva emojis (sistema de diseño). Limpia los que vengan en textos guardados antes de la 1.25. */
+const sinEmoji = t => String(t || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}\u{2B55}\u{FE0F}\u{200D}]/gu, '').replace(/\s{2,}/g, ' ').trim();
+
 function vistaAvisos() {
   const lista = estado.avisos;
   return `
@@ -2194,8 +2257,8 @@ function vistaAvisos() {
         : !lista.length ? '<p class="sub">No tienes avisos todavía. Aquí aparecerán las respuestas a tus licencias, tus pagos y los recordatorios.</p>'
         : `<ul class="avisos">${lista.map(a => `<li class="${a.nuevo ? 'nuevo' : ''}">
             <button onclick="irDesdeAviso('${esc(a.ir)}')">
-              <span class="aviso-cab"><b>${esc(a.titulo)}</b><small>${esc(haceCuanto(a.fecha))}</small></span>
-              <span class="aviso-texto">${esc(a.texto)}</span>
+              <span class="aviso-cab"><b>${esc(sinEmoji(a.titulo))}</b><small>${esc(haceCuanto(a.fecha))}</small></span>
+              <span class="aviso-texto">${esc(sinEmoji(a.texto))}</span>
               ${DESTINO[a.ir] ? `<small class="aviso-ir">Ver en ${DESTINO[a.ir]} →</small>` : ''}
             </button></li>`).join('')}</ul>`}
     </section>`;

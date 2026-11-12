@@ -11,7 +11,7 @@
  *
  * Cuando cambies algún archivo de la web, sube el número de VERSION.
  */
-const VERSION = 'agua-1.24';
+const VERSION = 'agua-1.25';
 const FUENTES = 'agua-fuentes';            // aparte: no se borra al cambiar de versión
 const ARCHIVOS = [
   './', 'index.html', 'estilos.css', 'app.js', 'config.js', 'manifest.webmanifest',
