@@ -525,7 +525,7 @@ function barraAbajo(d, partes, enGestion, totalPend) {
       ${partes.length ? boton(enGestion, 'Gestión',
           icono('gestion') + (totalPend ? `<span class="burbuja">${cifra(totalPend)}</span>` : ''), 'abrirGestion()',
           totalPend ? `aria-label="Gestión, ${totalPend} por revisar"` : '') : ''}
-      ${boton(v === 'perfil', 'Perfil', avatar({ id: d.yo.id, nombre: d.yo.nombre, fotoV: d.yo.fotoV }, 'mini'), 'abrirPerfil()')}
+      ${boton(v === 'perfil', 'Perfil', avatar({ id: d.yo.id, nombre: d.yo.nombre, fotoV: d.yo.fotoV }, 'en-barra'), 'abrirPerfil()')}
     </nav>`;
 }
 

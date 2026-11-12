@@ -5,7 +5,7 @@
  */
 const CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbxJU0c7BmP6wllXI1e5WCfcsfpfp_cOFpapevBWhJxOdIJGjeAJWXXxF3bC0bHTYIVK/exec',
-  VERSION: '1.26',
+  VERSION: '1.26.1',
 
   // v1.26 · Notificaciones push (proyecto de Firebase "Aguita-App" de Miguel).
   // Estos datos son PÚBLICOS: identifican el proyecto, no dan acceso. La clave secreta (cuenta de servicio)

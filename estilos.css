@@ -116,7 +116,7 @@
   .nav-abajo button { flex: 1; max-width: 130px; min-height: 54px; border: 0; background: none; cursor: pointer; padding: 4px 0;
     display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--tinta-2); font: 700 .72rem var(--texto);
     -webkit-tap-highlight-color: transparent; }
-  .nav-abajo .pildora { position: relative; width: 58px; height: 30px; border-radius: 999px; display: grid; place-items: center;
+  .nav-abajo .pildora { position: relative; width: 58px; height: 34px; border-radius: 999px; display: grid; place-items: center;
     transition: background-color .15s; }
   .nav-abajo .pildora > svg { width: 22px; height: 22px; }
   .nav-abajo button[aria-current="page"] { color: var(--azul-texto); }
@@ -127,14 +127,18 @@
   /* v1.25 · Punto (sin número) cuando falta tu respuesta y el plazo vence pronto */
   .nav-abajo .punto-nav { position: absolute; top: 1px; right: 14px; width: 10px; height: 10px; border-radius: 50%;
     background: var(--primario); border: 2px solid var(--superficie); }
-  .nav-abajo .av.mini { width: 26px; height: 26px; font-size: .68rem; }
-  .nav-abajo button[aria-current="page"] .av.mini { box-shadow: 0 0 0 2px var(--azul-texto); }
+  /* v1.26.1 · Tu foto en la barra. Antes usaba la clase "mini", que ya existía para los botones chicos
+     (borde, fondo y relleno de 6×10 px): la foto quedaba encogida a ~6 px de ancho. Ahora tiene su propia
+     clase, ocupa todo el círculo y es un poco más grande (32 px). Aro azul cuando estás en Perfil. */
+  .nav-abajo .av.en-barra { width: 32px; height: 32px; font-size: .78rem; }
+  .nav-abajo button[aria-current="page"] .av.en-barra { box-shadow: 0 0 0 2px var(--superficie), 0 0 0 4px var(--azul-texto); }
+  .nav-abajo button:has(.av.en-barra)[aria-current="page"] .pildora { background: none; }
   /* Espacio al final de cada pantalla para que la barra no tape lo último */
-  .relleno-nav { height: calc(76px + env(safe-area-inset-bottom)); }
+  .relleno-nav { height: calc(80px + env(safe-area-inset-bottom)); }
   /* Con el teclado abierto la barra estorba: se esconde mientras se escribe */
   body:has(:is(input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea):focus) .nav-abajo { display: none; }
   /* Los avisos flotantes salen encima de la barra */
-  body:has(.nav-abajo) .toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
+  body:has(.nav-abajo) .toast { bottom: calc(90px + env(safe-area-inset-bottom)); }
 
   /* Gestión: título y selector Lista / Tesorería / Directiva */
   .gestion-cabeza { margin: 2px 0 14px; }
